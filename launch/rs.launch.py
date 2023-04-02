@@ -7,10 +7,10 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     return LaunchDescription([
-        ExecuteProcess(cmd=['ros2', 'bag', 'record',
-            '/camera/color/image_rect_raw',
-            '/camera/aligned_depth_to_color/image_raw'
-        ]),
+       # ExecuteProcess(cmd=['ros2', 'bag', 'record',
+       #     '/camera/color/image_rect_raw',
+       #     '/camera/aligned_depth_to_color/image_raw'
+       # ]),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([get_package_share_directory('realsense2_camera') ,'/launch/rs_launch.py']),
             launch_arguments={
