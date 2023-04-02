@@ -27,5 +27,5 @@ def generate_launch_description():
                 #'camera_info_url': 'package://cuesr/config/depth_5_19_22.yaml',
                 }.items(),
         ),
-        Node(package='nxp_purt', executable='feature_points.py', output='screen')
+        Node(package='casadi_vio', executable='feature_points.py', output='screen')
     ])
