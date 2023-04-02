@@ -25,7 +25,7 @@ class FeaturePoints(Node):
         index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
         search_params = dict(checks=50)
         
-        flann_ = cv.FlannBasedMatcher(index_params,search_params)
+        self.flann_ = cv2.FlannBasedMatcher(index_params,search_params)
         
     def listener_callback(self, msg):
         img = self.br_.imgmsg_to_cv2(msg)
@@ -42,12 +42,11 @@ class FeaturePoints(Node):
             img2 = cv2.drawKeypoints(img, kp, None, (255,0,0), 4)
         elif method == 'orb':
             orb = cv2.ORB_create(nfeatures=50)
-            kp_c, des_c = orb.detectAndCompute(img, None)
-            
-            kp_prev = kp_c
-            des_prev = des_c
-            matches = flann.knnMatch(des_c,des_prev,k=2) 
-            #img2 = cv2.drawKeypoints(img, kp, None, (255,0,0), 4)
+            kp, des = orb.detectAndCompute(img, None)
+            kp_prev = kp
+            des_prev = des
+            #matches = self.flann_.knnMatch(des_c,des_prev,k=2) 
+            img2 = cv2.drawKeypoints(img, kp, None, (255,0,0), 4)
         elif method == 'none':
             img2 = img
         else:
