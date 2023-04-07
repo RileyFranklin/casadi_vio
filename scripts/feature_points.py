@@ -17,7 +17,7 @@ import casadi as ca
 
 
 import sys
-sys.path.insert(0, '/home/purt-admin/git/pyecca')
+sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca')
 from pyecca.lie import se3, so3
 
 class FeaturePoints(Node):
@@ -59,7 +59,7 @@ class FeaturePoints(Node):
 
         self.SE3 = se3._SE3()
         self.SO3 = so3._Dcm()
-        self.Top_=None
+        self.Top_= self.SE3.exp(self.SE3.wedge([0,0,0,0,0,0]))
 
     def Ad(self, T):
         C = T[:3,:3]
@@ -72,10 +72,10 @@ class FeaturePoints(Node):
         Cop = Top[:3,:3]
         rop = (-Cop.T@Top[:3,3])
         
-        P=p
-        Y=y
-        P = ca.SX(np.average(p,axis=0))
-        Y = ca.SX(np.average(y,axis=0))
+        P = p
+        Y = y
+        P = np.average(p,axis=0)
+        Y = np.average(y,axis=0)
         
         I = 0
         for j in range(len(p)):
@@ -106,7 +106,8 @@ class FeaturePoints(Node):
         #Optimizied pertubation point
         eopt=Tau@ca.inv(M)@Tau.T@a
         
-        return eopt   
+        return eopt  
+     
     def listener_callback(self, msg):
         img = self.br_.imgmsg_to_cv2(msg)
 
@@ -182,6 +183,18 @@ class FeaturePoints(Node):
                         xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
                         xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
 
+                        algopt = np.array([0,0,0,0,0,0])
+        
+                        algoptprev = None
+                        #----- Point Cloud Alignment, iterative optimization for each time step k -------
+                        counter = 0
+                        if self.img_prev_ is not None:
+                            while algoptprev is None or ca.norm_2(algopt-algoptprev)>1e-8:    
+                                algoptprev = algopt
+                                algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
+                                self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
+                                counter += 1
+
                 else:
                     print("Not enough features detected. Skipping frame...")
 
@@ -204,18 +217,7 @@ class FeaturePoints(Node):
             img2 = img
         else:
             raise ValueError('unknown method')
-        algopt = np.array([0,0,0,0,0,0])
-        
-        algoptprev = None
-        #----- Point Cloud Alignment, iterative optimization for each time step k -------
-        counter = 0
-        if self.pc_prev is not None and self.img_prev_ is not None:
-            print('yep')
-            while algoptprev is None or ca.norm_2(algopt-algoptprev)>1e-8:    
-                algoptprev = algopt
-                algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
-                self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
-                counter +=1
+
 
         return
 
@@ -262,15 +264,10 @@ class FeaturePoints(Node):
             shape=(points_len, ),
             dtype=point_cloud2.dtype_from_fields(cloud.fields, point_step=cloud.point_step),
             buffer=select_data)
-        
-        # Keep only the requested fields
-        if field_names is not None:
-            assert all(field_name in points.dtype.names for field_name in field_names), \
-                'Requests field is not in the fields of the PointCloud!'
-            # Mask fields
-            points = points[list(field_names)]
 
-        return points
+        points_out = np.vstack([points['x'], points['y'], points['z']])
+
+        return points_out
 
 def main(args=None):
     print("opencv version", cv2.__version__, cv2.__file__)
