@@ -13,7 +13,12 @@ from sensor_msgs.msg import Image, PointCloud2
 from std_msgs.msg import Int32
 import struct
 from sensor_msgs_py import point_cloud2
+import casadi as ca
 
+
+import sys
+sys.path.insert(0, '/home/purt-admin/git/pyecca')
+from pyecca.lie import se3, so3
 
 class FeaturePoints(Node):
 
@@ -51,7 +56,57 @@ class FeaturePoints(Node):
         self.nfeatures = 200
         self.u_=10
         self.v_=12
+
+        self.SE3 = se3._SE3()
+        self.SO3 = so3._Dcm()
+        self.Top_=None
+
+    def Ad(self, T):
+        C = T[:3,:3]
+        r = T[:3,3]
+        return ca.vertcat(ca.horzcat(C, self.SO3.wedge(r)@C), ca.horzcat(ca.SX.zeros(3,3),C))
+
+    def barfoot_solve(self, Top, p, y):
+        #the incorporated weights assume that every landmark is observed len(y) = len(w) = len(p)
+        Tau = self.Ad(Top)
+        Cop = Top[:3,:3]
+        rop = (-Cop.T@Top[:3,3])
         
+        P=p
+        Y=y
+        P = ca.SX(np.average(p,axis=0))
+        Y = ca.SX(np.average(y,axis=0))
+        
+        I = 0
+        for j in range(len(p)):
+            pint0=(p[j] - P)
+            I += self.SO3.wedge(pint0)@self.SO3.wedge(pint0)
+        I=-I/len(p)
+        
+        M1 = ca.vertcat(ca.horzcat(ca.SX.eye(3), ca.SX.zeros(3,3)), ca.horzcat(self.SO3.wedge(P),ca.SX.eye(3)))
+        M2 = ca.vertcat(ca.horzcat(ca.SX.eye(3), ca.SX.zeros(3,3)), ca.horzcat(ca.SX.zeros(3,3),I))
+        M3 = ca.vertcat(ca.horzcat(ca.SX.eye(3), -self.SO3.wedge(P)), ca.horzcat(ca.SX.zeros(3,3),ca.SX.eye(3)))
+        M=M1@M2@M3
+        
+        W = 0
+        for j in range(len(y)):
+            pj = p[j]
+            yj = y[j]
+            
+            W += (yj-Y)@(pj-P).T  
+        W = W/len(y)
+        
+        b=ca.SX.zeros(1,3)
+        b[0] = ca.trace(self.SO3.wedge([1,0,0])@Cop@W.T)
+        b[1] = ca.trace(self.SO3.wedge([0,1,0])@Cop@W.T)
+        b[2] = ca.trace(self.SO3.wedge([0,0,1])@Cop@W.T) 
+
+        a=ca.vertcat(Y-Cop@(P-rop),b.T-self.SO3.wedge(Y)@Cop@(P-rop))
+        
+        #Optimizied pertubation point
+        eopt=Tau@ca.inv(M)@Tau.T@a
+        
+        return eopt   
     def listener_callback(self, msg):
         img = self.br_.imgmsg_to_cv2(msg)
 
@@ -127,7 +182,6 @@ class FeaturePoints(Node):
                         xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
                         xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
 
-                        # print(xyz_points)
                 else:
                     print("Not enough features detected. Skipping frame...")
 
@@ -150,7 +204,19 @@ class FeaturePoints(Node):
             img2 = img
         else:
             raise ValueError('unknown method')
-       
+        algopt = np.array([0,0,0,0,0,0])
+        
+        algoptprev = None
+        #----- Point Cloud Alignment, iterative optimization for each time step k -------
+        counter = 0
+        if self.pc_prev is not None and self.img_prev_ is not None:
+            print('yep')
+            while algoptprev is None or ca.norm_2(algopt-algoptprev)>1e-8:    
+                algoptprev = algopt
+                algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
+                self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
+                counter +=1
+
         return
 
     def listener_callback_pc(self, msg):
@@ -163,31 +229,7 @@ class FeaturePoints(Node):
             self.pc_prev = self.pc
             self.pc = msg
 
-        # # Riley Solution
-        # #maybe try to chop off rgb values
-        # ## get width and height of 2D point cloud data
-        # pCloud=msg
-        # width = 400 #pCloud.width
-        # height = 200#pCloud.height
-        
-        # # Convert from u (column / width), v (row/height) to position in array
-        # # where X,Y,Z data starts
-        # arrayPosition = self.v_*pCloud.row_step + self.u_*pCloud.point_step
-        
-        # #compute position in array where x,y,z data start
-        # PosX = arrayPosition + pCloud.fields[0].offset; #// X has an offset of 0
-        # PosY = arrayPosition + pCloud.fields[1].offset; #// Y has an offset of 4
-        # PosZ = arrayPosition + pCloud.fields[2].offset; #// Z has an offset of 8
-        
-        # #X = struct.unpack('f',bytearray(pCloud.data[arrayPosX:arrayPosX+3]))
-        # Xbyte=bytearray([pCloud.data[PosX],pCloud.data[PosX+1],pCloud.data[PosX+2],pCloud.data[PosX+3]])
-        # Ybyte=bytearray([pCloud.data[PosY],pCloud.data[PosY+1],pCloud.data[PosY+2],pCloud.data[PosY+3]])
-        # Zbyte=bytearray([pCloud.data[PosZ],pCloud.data[PosZ+1],pCloud.data[PosZ+2],pCloud.data[PosZ+3]])
-        # X = struct.unpack('f',Xbyte)
-        # Y = struct.unpack('f',Ybyte)
-        # Z = struct.unpack('f',Zbyte)
-        
-        # print(X,',',Y,',',Z)
+
 
         return
     
