@@ -17,8 +17,9 @@ import casadi as ca
 
 
 import sys
+import time
 sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca')
-from pyecca.lie import se3, so3
+from pyecca.lie_numpy import se3, so3
 
 class FeaturePoints(Node):
 
@@ -53,7 +54,7 @@ class FeaturePoints(Node):
         self.point_cloud_=None
         self.pc_prev = None
         self.pc = None
-        self.nfeatures = 200
+        self.nfeatures = 50
         self.u_=10
         self.v_=12
 
@@ -70,43 +71,42 @@ class FeaturePoints(Node):
         #the incorporated weights assume that every landmark is observed len(y) = len(w) = len(p)
         Tau = self.Ad(Top)
         Cop = Top[:3,:3]
-        rop = (-Cop.T@Top[:3,3])
+        rop = np.expand_dims((-Cop.T@Top[:3,3]), axis=0)
         
-        P = p
-        Y = y
-        P = np.average(p,axis=0)
-        Y = np.average(y,axis=0)
+        P = np.expand_dims(np.average(p,axis=0), axis=0)
+        Y = np.expand_dims(np.average(y,axis=0), axis=0)
         
         I = 0
         for j in range(len(p)):
-            pint0=(p[j] - P)
-            I += self.SO3.wedge(pint0)@self.SO3.wedge(pint0)
+            pint0 = p[[j],:] - P
+
+            I += self.SO3.wedge(pint0[0])@self.SO3.wedge(pint0[0])
         I=-I/len(p)
         
-        M1 = ca.vertcat(ca.horzcat(ca.SX.eye(3), ca.SX.zeros(3,3)), ca.horzcat(self.SO3.wedge(P),ca.SX.eye(3)))
-        M2 = ca.vertcat(ca.horzcat(ca.SX.eye(3), ca.SX.zeros(3,3)), ca.horzcat(ca.SX.zeros(3,3),I))
-        M3 = ca.vertcat(ca.horzcat(ca.SX.eye(3), -self.SO3.wedge(P)), ca.horzcat(ca.SX.zeros(3,3),ca.SX.eye(3)))
+        M1 = np.vstack((np.hstack((np.eye(3), np.zeros([3,3]))), np.hstack((self.SO3.wedge(P[0]),np.eye(3)))))
+        M2 = np.vstack((np.hstack((np.eye(3), np.zeros([3,3]))), np.hstack((np.zeros([3,3]),I))))
+        M3 = np.vstack((np.hstack((np.eye(3), -self.SO3.wedge(P[0]))), np.hstack((np.zeros([3,3]),np.eye(3)))))
         M=M1@M2@M3
-        
+
         W = 0
         for j in range(len(y)):
-            pj = p[j]
-            yj = y[j]
-            
-            W += (yj-Y)@(pj-P).T  
+            pj = p[[j],:]
+            yj = y[[j],:]
+
+            W += (yj-Y).T@(pj-P)
         W = W/len(y)
         
-        b=ca.SX.zeros(1,3)
-        b[0] = ca.trace(self.SO3.wedge([1,0,0])@Cop@W.T)
-        b[1] = ca.trace(self.SO3.wedge([0,1,0])@Cop@W.T)
-        b[2] = ca.trace(self.SO3.wedge([0,0,1])@Cop@W.T) 
+        b=np.zeros([1,3])
+        b[0,0] = np.trace(self.SO3.wedge([1,0,0])@Cop@W.T)
+        b[0,1] = np.trace(self.SO3.wedge([0,1,0])@Cop@W.T)
+        b[0,2] = np.trace(self.SO3.wedge([0,0,1])@Cop@W.T)
 
-        a=ca.vertcat(Y-Cop@(P-rop),b.T-self.SO3.wedge(Y)@Cop@(P-rop))
+        a=np.vstack((Y.T-Cop@(P-rop).T, b.T-self.SO3.wedge(Y[0])@Cop@(P-rop).T))
         
         #Optimizied pertubation point
-        eopt=Tau@ca.inv(M)@Tau.T@a
+        eopt=Tau@np.linalg.inv(M)@Tau.T@a
         
-        return eopt  
+        return eopt   
      
     def listener_callback(self, msg):
         img = self.br_.imgmsg_to_cv2(msg)
@@ -189,11 +189,17 @@ class FeaturePoints(Node):
                         #----- Point Cloud Alignment, iterative optimization for each time step k -------
                         counter = 0
                         if self.img_prev_ is not None:
+                            start_time = time.time()
                             while algoptprev is None or ca.norm_2(algopt-algoptprev)>1e-8:    
                                 algoptprev = algopt
                                 algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
                                 self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
                                 counter += 1
+                            end_time = time.time()
+                            converge_time = end_time - start_time
+                            
+                            print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
+                            print(self.Top_)
 
                 else:
                     print("Not enough features detected. Skipping frame...")
@@ -265,7 +271,7 @@ class FeaturePoints(Node):
             dtype=point_cloud2.dtype_from_fields(cloud.fields, point_step=cloud.point_step),
             buffer=select_data)
 
-        points_out = np.vstack([points['x'], points['y'], points['z']])
+        points_out = np.vstack([points['x'], points['y'], points['z']]).T
 
         return points_out
 
