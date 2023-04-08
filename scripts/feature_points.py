@@ -21,6 +21,9 @@ import time
 sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca')
 from pyecca.lie_numpy import se3, so3
 
+sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca/notebooks/BA')
+import BF_PCA
+
 class FeaturePoints(Node):
 
     def __init__(self):
@@ -39,12 +42,11 @@ class FeaturePoints(Node):
         self.publish = self.create_publisher(Int32, 'width', 10)
         self.br_ = CvBridge()
         
-        FLANN_INDEX_LSH = 5
+        FLANN_INDEX_LSH = 6
         index_params= dict(algorithm = FLANN_INDEX_LSH,
                    table_number = 6, # 12
-                   #key_size = 12,     # 20
-                   #multi_probe_level = 1,
-                   trees=5) #2
+                   key_size = 12,     # 20
+                   multi_probe_level = 1) #2
         search_params = dict(checks=50)
         self.first_img_=0
         self.flann_ = cv2.FlannBasedMatcher(index_params,search_params)
@@ -54,9 +56,11 @@ class FeaturePoints(Node):
         self.point_cloud_=None
         self.pc_prev = None
         self.pc = None
-        self.nfeatures = 50
+        self.nfeatures = 200
         self.u_=10
         self.v_=12
+        self.depth_min_lim = 0.1
+        self.depth_max_lim = 3
 
         self.SE3 = se3._SE3()
         self.SO3 = so3._Dcm()
@@ -65,7 +69,7 @@ class FeaturePoints(Node):
     def Ad(self, T):
         C = T[:3,:3]
         r = T[:3,3]
-        return ca.vertcat(ca.horzcat(C, self.SO3.wedge(r)@C), ca.horzcat(ca.SX.zeros(3,3),C))
+        return np.vstack((np.hstack((C, self.SO3.wedge(r)@C)), np.hstack((np.zeros([3,3]),C))))
 
     def barfoot_solve(self, Top, p, y):
         #the incorporated weights assume that every landmark is observed len(y) = len(w) = len(p)
@@ -131,12 +135,21 @@ class FeaturePoints(Node):
                 self.img_prev_ = img
             # Catches if zero features are calculated.
             elif (len(kp) > 0) and (len(self.kp_prev_) > 0):
-                matches = self.flann_.knnMatch(np.float32(des),np.float32(self.des_prev_),k=2)
+                # matches = self.flann_.knnMatch(np.float32(des),np.float32(self.des_prev_),k=2)
+                matches = self.flann_.knnMatch(des, self.des_prev_, k=2)
+
+                # Chase filter (required)
+                # print("Before Chase filter: ", len(matches))
+                pruned_matches = [m for m in matches if len(m) == 2]
+                matches = pruned_matches
+                # print("After Chase filter: ", len(matches))
+
                 # Need to draw only good matches, so create a mask
                 matchesMask = [[0,0] for i in range(len(matches))]
+
                 # ratio test as per Lowe's paper
                 for i,(m,n) in enumerate(matches):
-                    if m.distance < 0.60*n.distance:
+                    if m.distance < 0.7*n.distance:
                         matchesMask[i]=[1,0]
                 draw_params = dict(matchColor = (0,255,0),
                                 singlePointColor = (255,0,0),
@@ -144,65 +157,124 @@ class FeaturePoints(Node):
                                 flags = cv2.DrawMatchesFlags_DEFAULT)
                 img2 = cv2.drawMatchesKnn(img,kp,self.img_prev_,self.kp_prev_,matches,None,**draw_params)
 
+
                 # Publish img2 to msg
                 out_msg = self.br_.cv2_to_imgmsg(img2, encoding='rgb8')
                 self.publisher_.publish(out_msg)
 
+                # print("Before ratio test: ", len(matches))
                 # Get only the good matches
-                good_m2 = []
+                good_m = []
                 for i, match in enumerate(matchesMask):
                     if match[0] == 1:
-                        good_m2.append(matches[i])
+                        good_m.append(matches[i])
+                matches = good_m
+                # print("After ratio test: ", len(matches))
 
-                # Loop through all good points and store their x and y pixel location
-                list_pxl_prev = []
-                list_pxl = []
+                if len(matches) > 1:
 
-                # Skips xyz point collection if not enough features are detected.
-                if not (len(kp) < self.nfeatures) and not (len(self.kp_prev_) < self.nfeatures):
+                    # Loop through all good points and store their x and y pixel location
+                    list_pxl_prev = []
+                    list_pxl = []
 
-                    # For each match...
-                    for mat in good_m2:
+                    # Skips xyz point collection if not enough features are detected.
+                    if not (len(kp) < self.nfeatures) and not (len(self.kp_prev_) < self.nfeatures):
+                    # if True:
 
-                        # Get the matching keypoints for each of the images
-                        img0_idx = mat[0].queryIdx
-                        img1_idx = mat[0].trainIdx
+                        # For each match...
+                        for mat in matches:
 
-                        # x - columns
-                        # y - rows
-                        # Get the coordinates
-                        (x0, y0) = self.kp_prev_[img0_idx].pt
-                        (x1, y1) = kp[img1_idx].pt
+                            # Get the matching keypoints for each of the images
+                            img0_idx = mat[0].queryIdx
+                            img1_idx = mat[0].trainIdx
 
-                        # Append to each list
-                        list_pxl_prev.append((int(round(x0)), int(round(y0))))
-                        list_pxl.append((int(round(x1)), int(round(y1))))
+                            # x - columns
+                            # y - rows
+                            # Get the coordinates
+                            (x0, y0) = self.kp_prev_[img0_idx].pt
+                            (x1, y1) = kp[img1_idx].pt
 
-                    # Use get_points_efficient to get xyz points for all good matches
-                    if self.pc_prev is not None:
-                        xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
-                        xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
+                            # Append to each list
+                            list_pxl_prev.append((int(round(x0)), int(round(y0))))
+                            list_pxl.append((int(round(x1)), int(round(y1))))
 
-                        algopt = np.array([0,0,0,0,0,0])
-        
-                        algoptprev = None
-                        #----- Point Cloud Alignment, iterative optimization for each time step k -------
-                        counter = 0
-                        if self.img_prev_ is not None:
-                            start_time = time.time()
-                            while algoptprev is None or ca.norm_2(algopt-algoptprev)>1e-8:    
-                                algoptprev = algopt
-                                algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
-                                self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
-                                counter += 1
-                            end_time = time.time()
-                            converge_time = end_time - start_time
+                        # Use get_points_efficient to get xyz points for all good matches
+                        list_pxl = [(424, 240)]
+                        if self.pc_prev is not None:
+                            xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
+                            xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
+
+                            # # Hardcode box test problem
+                            # points_0 = np.array([
+                            #     [1, 0, 0],
+                            #     [0, 1, 0],
+                            #     [0, 0, 1],
+                            #     [1, 0, 1],
+                            #     [0, 1, 1],
+                            #     [1, 1, 0],
+                            # ])
+
+                            # R_true = BF_PCA.euler2rot(1, 0.5, -1)
+                            # t_true = np.array([[0],
+                            #                 [0],
+                            #                 [0],
+                            #                 ])
+                            # T_01_true = np.vstack([np.hstack([R_true, t_true]), np.array([[0, 0, 0, 1]])])
+                            # T_01_true
+
+                            # points_1 = BF_PCA.applyT(points_0, T_01_true)
+
+                            # print('T_01_true:', T_01_true)
+
+                            # xyz_points_prev = points_0
+                            # xyz_points = points_1
+
+                            # print("Points before xyz distance pruning: ", len(xyz_points))
+
+                            # Prune points that are too close or too far away from camera
+                            delete_ind_list = []
+                            for lcv in range(len(xyz_points)):
+                                # Lower tolerance
+                                if (np.linalg.norm(xyz_points[[lcv],:]) < self.depth_min_lim) or (np.linalg.norm(xyz_points_prev[[lcv],:]) < self.depth_min_lim):
+                                    delete_ind_list.append(lcv)
+                                # Upper tolerance
+                                elif (np.linalg.norm(xyz_points[[lcv],:]) > self.depth_max_lim) or (np.linalg.norm(xyz_points_prev[[lcv],:]) > self.depth_max_lim):
+                                    delete_ind_list.append(lcv)
+                            # Delete garbage points based on min/max depth limits
+                            xyz_points_prev = np.delete(xyz_points_prev, delete_ind_list, 0)
+                            xyz_points = np.delete(xyz_points, delete_ind_list, 0)
+
+                            # print("Points remaining after xyz distance pruning: ", len(xyz_points))
                             
-                            print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
-                            print(self.Top_)
 
+                            print(xyz_points)
+
+
+                            if len(xyz_points) > 2:
+                                algopt = np.array([0,0,0,0,0,0])
+                
+                                algoptprev = None
+                                #----- Point Cloud Alignment, iterative optimization for each time step k -------
+                                counter = 0
+                                if self.img_prev_ is not None:
+                                    start_time = time.time()
+                                    #  and counter<200
+                                    # while (algoptprev is None or np.linalg.norm(algopt-algoptprev)>1e-4):    
+                                    #     algoptprev = algopt
+                                    #     algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
+                                    #     self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
+                                    #     counter += 1
+                                    # end_time = time.time()
+                                    # converge_time = end_time - start_time
+                                    
+                                    # print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
+                                    # print(self.Top_)
+
+                    else:
+                        print("Detected number of features = ", len(kp), ". Skipping frame...")
                 else:
-                    print("Not enough features detected. Skipping frame...")
+                    print("Need at least 2 good matches to run. Skipping frame...")
+
 
                 # # Testing
                 # img_idx=matches[0][0].queryIdx
@@ -217,7 +289,7 @@ class FeaturePoints(Node):
                 self.img_prev_ = img 
 
             else:
-                print("Not enough features detected. Skipping frame...")
+                print("Zero features found. Skipping frame...")
             
         elif method == 'none':
             img2 = img
