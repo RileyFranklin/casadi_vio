@@ -14,16 +14,16 @@ from std_msgs.msg import Int32
 import struct
 from sensor_msgs_py import point_cloud2
 import casadi as ca
-
+from skimage.measure import ransac
+from skimage.transform import ProjectiveTransform, AffineTransform
 
 import sys
 import time
-sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca')
+sys.path.insert(0, '/home/purt-admin/git/pyecca')
 from pyecca.lie_numpy import se3, so3
 
-sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca/notebooks/BA')
+sys.path.insert(0, '/home/purt-admin/git/pyecca/notebooks/BA')
 import BF_PCA
-
 class FeaturePoints(Node):
 
     def __init__(self):
@@ -56,11 +56,12 @@ class FeaturePoints(Node):
         self.point_cloud_=None
         self.pc_prev = None
         self.pc = None
-        self.nfeatures = 200
+        self.nfeatures = 250
         self.u_=10
         self.v_=12
         self.depth_min_lim = 0.1
-        self.depth_max_lim = 3
+        self.depth_max_lim = 5
+        self.ransac_T=None
 
         self.SE3 = se3._SE3()
         self.SO3 = so3._Dcm()
@@ -158,6 +159,7 @@ class FeaturePoints(Node):
                 img2 = cv2.drawMatchesKnn(img,kp,self.img_prev_,self.kp_prev_,matches,None,**draw_params)
 
 
+
                 # Publish img2 to msg
                 out_msg = self.br_.cv2_to_imgmsg(img2, encoding='rgb8')
                 self.publisher_.publish(out_msg)
@@ -170,13 +172,12 @@ class FeaturePoints(Node):
                         good_m.append(matches[i])
                 matches = good_m
                 # print("After ratio test: ", len(matches))
-
+                
                 if len(matches) > 1:
 
                     # Loop through all good points and store their x and y pixel location
                     list_pxl_prev = []
                     list_pxl = []
-
                     # Skips xyz point collection if not enough features are detected.
                     if not (len(kp) < self.nfeatures) and not (len(self.kp_prev_) < self.nfeatures):
                     # if True:
@@ -199,12 +200,12 @@ class FeaturePoints(Node):
                             list_pxl.append((int(round(x1)), int(round(y1))))
 
                         # Use get_points_efficient to get xyz points for all good matches
-                        list_pxl = [(424, 240)]
                         if self.pc_prev is not None:
+                                                        
                             xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
                             xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
 
-                            # # Hardcode box test problem
+
                             # points_0 = np.array([
                             #     [1, 0, 0],
                             #     [0, 1, 0],
@@ -228,7 +229,44 @@ class FeaturePoints(Node):
 
                             # xyz_points_prev = points_0
                             # xyz_points = points_1
+                            ransacking = True
+                            counter2=0                            
+                            while ransacking ==True:
+                                rand_ints=np.sort(np.random.choice(len(xyz_points),5,replace=False))
+                                rand_ints= rand_ints[::-1]
+                                prev_points_rand=xyz_points_prev[rand_ints,:]
+                                points_rand=xyz_points[rand_ints,:]
+                                algopt = np.array([0,0,0,0,0,0])
+                                self.ransac_T=self.SE3.exp(self.SE3.wedge(algopt))
+                                algoptprev=None
+                                unsorted = np.array(range(len(xyz_points)))
+                                for i in rand_ints:
+                                    unsorted = np.delete(unsorted,i)
+                
+                                inliers=rand_ints
+                                counter2 += 1
+                                counter = 0
 
+                                while (algoptprev is None or np.linalg.norm(algopt-algoptprev)>1e-1) and counter<900:    
+                                    algoptprev = algopt
+                                    algopt = self.barfoot_solve(self.ransac_T,prev_points_rand,points_rand)
+                                    self.ransac_T = self.SE3.exp(self.SE3.wedge(algopt))@self.ransac_T
+                                    counter +=1 
+                                for i in unsorted:
+                                    if np.linalg.norm(np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T - self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T))<.1:
+                                        inliers = np.append(inliers,i)
+                                if len(inliers)>40:
+                                    xyz_points=xyz_points[inliers,:]
+                                    xyz_points_prev=xyz_points_prev[inliers,:]
+                                    ransacking=False
+                                #else:
+                                    #print('failure to find adequate guess')
+                                if counter2 >10:
+                                    return
+                            print('num inliers',len(inliers))
+
+                            # # Hardcode box test problem
+                            
                             # print("Points before xyz distance pruning: ", len(xyz_points))
 
                             # Prune points that are too close or too far away from camera
@@ -247,9 +285,6 @@ class FeaturePoints(Node):
                             # print("Points remaining after xyz distance pruning: ", len(xyz_points))
                             
 
-                            print(xyz_points)
-
-
                             if len(xyz_points) > 2:
                                 algopt = np.array([0,0,0,0,0,0])
                 
@@ -259,16 +294,17 @@ class FeaturePoints(Node):
                                 if self.img_prev_ is not None:
                                     start_time = time.time()
                                     #  and counter<200
-                                    # while (algoptprev is None or np.linalg.norm(algopt-algoptprev)>1e-4):    
-                                    #     algoptprev = algopt
-                                    #     algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
-                                    #     self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
-                                    #     counter += 1
-                                    # end_time = time.time()
-                                    # converge_time = end_time - start_time
+                                    while (algoptprev is None or np.linalg.norm(algopt-algoptprev)>1e-4):    
+                                        algoptprev = algopt
+                                        algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
+                                        self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
+                                        counter += 1
+                                    end_time = time.time()
+                                    converge_time = end_time - start_time
                                     
-                                    # print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
-                                    # print(self.Top_)
+                                    print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
+                                    print(self.Top_)
+                                
 
                     else:
                         print("Detected number of features = ", len(kp), ". Skipping frame...")
@@ -295,7 +331,8 @@ class FeaturePoints(Node):
             img2 = img
         else:
             raise ValueError('unknown method')
-
+        # out_msg = self.br_.cv2_to_imgmsg(img2, encoding='rgb8')
+        # self.publisher_.publish(out_msg)
 
         return
 
