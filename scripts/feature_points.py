@@ -2,6 +2,8 @@
 
 import array
 from typing import Iterable, List, NamedTuple, Optional
+import cProfile, pstats, io
+from pstats import SortKey
 
 import rclpy
 from rclpy.node import Node
@@ -10,12 +12,14 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 from sensor_msgs.msg import Image, PointCloud2
+from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Int32
 import struct
 from sensor_msgs_py import point_cloud2
 import casadi as ca
 from skimage.measure import ransac
 from skimage.transform import ProjectiveTransform, AffineTransform
+import tf_transformations
 
 import sys
 import time
@@ -35,12 +39,14 @@ class FeaturePoints(Node):
             self.listener_callback,
             10)
         self.publisher_ = self.create_publisher(Image, 'feature_points', 10)
+        self.pub_ransac_img_ = self.create_publisher(Image, 'ransac_feature_points', 10)
         self.subscription_ = self.create_subscription(
             PointCloud2,
             '/camera/depth/color/points',
             self.listener_callback_pc,
             10)
-        self.publish = self.create_publisher(Int32, 'width', 10)
+
+        self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
         self.br_ = CvBridge()
         
         FLANN_INDEX_LSH = 6
@@ -67,6 +73,7 @@ class FeaturePoints(Node):
         self.SE3 = se3._SE3()
         self.SO3 = so3._Dcm()
         self.Top_= self.SE3.exp(self.SE3.wedge([0,0,0,0,0,0]))
+        print("Resetting: ")
 
     def Ad(self, T):
         C = T[:3,:3]
@@ -138,7 +145,8 @@ class FeaturePoints(Node):
             # Catches if zero features are calculated.
             elif (len(kp) > 0) and (len(self.kp_prev_) > 0):
                 # matches = self.flann_.knnMatch(np.float32(des),np.float32(self.des_prev_),k=2)
-                matches = self.flann_.knnMatch(des, self.des_prev_, k=2)
+                # matches = self.flann_.knnMatch(des, self.des_prev_, k=2)
+                matches = self.flann_.knnMatch(self.des_prev_, des, k=2)
 
                 # Chase filter (required)
                 # print("Before Chase filter: ", len(matches))
@@ -157,7 +165,12 @@ class FeaturePoints(Node):
                                 singlePointColor = (255,0,0),
                                 matchesMask = matchesMask,
                                 flags = cv2.DrawMatchesFlags_DEFAULT)
-                img2 = cv2.drawMatchesKnn(img,kp,self.img_prev_,self.kp_prev_,matches,None,**draw_params)
+                
+                img2 = cv2.drawMatchesKnn(
+                    img1=self.img_prev_, keypoints1=self.kp_prev_,
+                    img2=img, keypoints2=kp,
+                    matches1to2=matches,
+                    outImg=None,**draw_params)
 
 
 
@@ -229,7 +242,6 @@ class FeaturePoints(Node):
                             # xyz_points_prev = points_0
                             # xyz_points = points_1
 
-
                             # Prune points that are too close or too far away from camera
                             print("Points before xyz distance pruning: ", len(xyz_points))
                             delete_ind_list = []
@@ -268,11 +280,9 @@ class FeaturePoints(Node):
                                     algopt = self.barfoot_solve(self.ransac_T,prev_points_rand,points_rand)
                                     self.ransac_T = self.SE3.exp(self.SE3.wedge(algopt))@self.ransac_T
                                     counter +=1
-                                print(self.ransac_T)
                                 for i in unsorted:
                                     if np.linalg.norm(np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T - self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T))<.1:
                                         inliers = np.append(inliers,i)
-                                print(len(inliers))
                                 if len(inliers)>40:
                                     xyz_points=xyz_points[inliers,:]
                                     xyz_points_prev=xyz_points_prev[inliers,:]
@@ -283,8 +293,23 @@ class FeaturePoints(Node):
                                     print("I'm getting lost here!")
                                     return
                             print('num inliers',len(inliers))
-                            
 
+                            matchesMask = [[1 if i in inliers else 0, 0] for i in range(len(matches))]
+                            # print(matches)
+                            draw_params = dict(matchColor = (0,255,0),
+                                singlePointColor = (255,0,0),
+                                matchesMask = matchesMask,
+                                flags = cv2.DrawMatchesFlags_DEFAULT)
+                            img3 = cv2.drawMatchesKnn(
+                                img1=self.img_prev_, keypoints1=self.kp_prev_,
+                                img2=img, keypoints2=kp,
+                                matches1to2=matches,
+                                outImg=None,**draw_params)
+
+                            # Publish img2 to msg
+                            out_msg = self.br_.cv2_to_imgmsg(img3, encoding='rgb8')
+                            self.pub_ransac_img_.publish(out_msg)
+                            
                             if len(xyz_points) > 2:
                                 algopt = np.array([0,0,0,0,0,0])
                 
@@ -302,8 +327,23 @@ class FeaturePoints(Node):
                                     end_time = time.time()
                                     converge_time = end_time - start_time
                                     
-                                    print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
-                                    print(self.Top_)
+                                    # print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
+                                    # print(self.Top_)
+
+                                    # R = self.Top_[:3,:3]
+                                    # print("R: ", R)
+                                    q = tf_transformations.quaternion_from_matrix(self.Top_)
+
+                                    msg = PoseStamped()
+                                    msg.pose.position.x = self.Top_[0,3]
+                                    msg.pose.position.y = self.Top_[1,3]
+                                    msg.pose.position.z = self.Top_[2,3]
+                                    msg.header.frame_id = "map"
+                                    msg.pose.orientation.x = q[0]
+                                    msg.pose.orientation.y = q[1]
+                                    msg.pose.orientation.z = q[2]
+                                    msg.pose.orientation.w = q[3]
+                                    self.pub_pose_.publish(msg)
                                 
 
                     else:
@@ -388,7 +428,26 @@ def main(args=None):
     print("opencv version", cv2.__version__, cv2.__file__)
     rclpy.init(args=args)
     feature_points = FeaturePoints()
-    rclpy.spin(feature_points)
+
+
+
+
+    pr = cProfile.Profile()
+    pr.enable()
+    
+    try:
+        rclpy.spin(feature_points)
+
+    except KeyboardInterrupt as e:
+        pass
+
+    pr.disable()
+    s = io.StringIO()
+    sortby = SortKey.CUMULATIVE
+    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    ps.print_stats()
+    print(s.getvalue())
+
     rclpy.shutdown()
 
 

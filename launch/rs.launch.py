@@ -22,5 +22,16 @@ def generate_launch_description():
         		'pointcloud.ordered_pc': 'true',
                 }.items(),
         ),
+        Node(
+           package='tf2_ros',
+           output='log',
+           executable='static_transform_publisher',
+           parameters=[
+             {'use_sim_time': False}
+           ],
+           arguments=[
+               "0", "0", "0", "0", "0", "0",
+               "map", "test_frame"]
+        ),
         #Node(package='casadi_vio', executable='feature_points.py', output='screen')
     ])
