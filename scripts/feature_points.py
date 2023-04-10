@@ -19,11 +19,12 @@ from skimage.transform import ProjectiveTransform, AffineTransform
 
 import sys
 import time
-sys.path.insert(0, '/home/purt-admin/git/pyecca')
+sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca')
 from pyecca.lie_numpy import se3, so3
 
-sys.path.insert(0, '/home/purt-admin/git/pyecca/notebooks/BA')
+sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca/notebooks/BA')
 import BF_PCA
+
 class FeaturePoints(Node):
 
     def __init__(self):
@@ -205,7 +206,7 @@ class FeaturePoints(Node):
                             xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
                             xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
 
-
+                            # # Hardcode box test problem
                             # points_0 = np.array([
                             #     [1, 0, 0],
                             #     [0, 1, 0],
@@ -213,8 +214,9 @@ class FeaturePoints(Node):
                             #     [1, 0, 1],
                             #     [0, 1, 1],
                             #     [1, 1, 0],
+                            #     [1, 1, 1],
+                            #     [0, 1, 1],
                             # ])
-
                             # R_true = BF_PCA.euler2rot(1, 0.5, -1)
                             # t_true = np.array([[0],
                             #                 [0],
@@ -222,13 +224,27 @@ class FeaturePoints(Node):
                             #                 ])
                             # T_01_true = np.vstack([np.hstack([R_true, t_true]), np.array([[0, 0, 0, 1]])])
                             # T_01_true
-
                             # points_1 = BF_PCA.applyT(points_0, T_01_true)
-
-                            # print('T_01_true:', T_01_true)
-
+                            # # print('T_01_true:', T_01_true)
                             # xyz_points_prev = points_0
                             # xyz_points = points_1
+
+
+                            # Prune points that are too close or too far away from camera
+                            print("Points before xyz distance pruning: ", len(xyz_points))
+                            delete_ind_list = []
+                            for lcv in range(len(xyz_points)):
+                                # Lower tolerance
+                                if (np.linalg.norm(xyz_points[[lcv],:]) < self.depth_min_lim) or (np.linalg.norm(xyz_points_prev[[lcv],:]) < self.depth_min_lim):
+                                    delete_ind_list.append(lcv)
+                                # Upper tolerance
+                                elif (np.linalg.norm(xyz_points[[lcv],:]) > self.depth_max_lim) or (np.linalg.norm(xyz_points_prev[[lcv],:]) > self.depth_max_lim):
+                                    delete_ind_list.append(lcv)
+                            # Delete garbage points based on min/max depth limits
+                            xyz_points_prev = np.delete(xyz_points_prev, delete_ind_list, 0)
+                            xyz_points = np.delete(xyz_points, delete_ind_list, 0)
+                            print("Points remaining after xyz distance pruning: ", len(xyz_points))
+
                             ransacking = True
                             counter2=0                            
                             while ransacking ==True:
@@ -251,10 +267,12 @@ class FeaturePoints(Node):
                                     algoptprev = algopt
                                     algopt = self.barfoot_solve(self.ransac_T,prev_points_rand,points_rand)
                                     self.ransac_T = self.SE3.exp(self.SE3.wedge(algopt))@self.ransac_T
-                                    counter +=1 
+                                    counter +=1
+                                print(self.ransac_T)
                                 for i in unsorted:
                                     if np.linalg.norm(np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T - self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T))<.1:
                                         inliers = np.append(inliers,i)
+                                print(len(inliers))
                                 if len(inliers)>40:
                                     xyz_points=xyz_points[inliers,:]
                                     xyz_points_prev=xyz_points_prev[inliers,:]
@@ -262,27 +280,9 @@ class FeaturePoints(Node):
                                 #else:
                                     #print('failure to find adequate guess')
                                 if counter2 >10:
+                                    print("I'm getting lost here!")
                                     return
                             print('num inliers',len(inliers))
-
-                            # # Hardcode box test problem
-                            
-                            # print("Points before xyz distance pruning: ", len(xyz_points))
-
-                            # Prune points that are too close or too far away from camera
-                            delete_ind_list = []
-                            for lcv in range(len(xyz_points)):
-                                # Lower tolerance
-                                if (np.linalg.norm(xyz_points[[lcv],:]) < self.depth_min_lim) or (np.linalg.norm(xyz_points_prev[[lcv],:]) < self.depth_min_lim):
-                                    delete_ind_list.append(lcv)
-                                # Upper tolerance
-                                elif (np.linalg.norm(xyz_points[[lcv],:]) > self.depth_max_lim) or (np.linalg.norm(xyz_points_prev[[lcv],:]) > self.depth_max_lim):
-                                    delete_ind_list.append(lcv)
-                            # Delete garbage points based on min/max depth limits
-                            xyz_points_prev = np.delete(xyz_points_prev, delete_ind_list, 0)
-                            xyz_points = np.delete(xyz_points, delete_ind_list, 0)
-
-                            # print("Points remaining after xyz distance pruning: ", len(xyz_points))
                             
 
                             if len(xyz_points) > 2:
