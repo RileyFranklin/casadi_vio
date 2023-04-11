@@ -69,7 +69,7 @@ class FeaturePoints(Node):
         dist = np.reshape(dist, [self.pc.height, self.pc.width])
 
         # Normalize about 255 and round down
-        dist = np.round(dist*30)
+        dist = np.round(dist*20)
         dist = dist.astype(np.uint8)
 
         # print(dist)

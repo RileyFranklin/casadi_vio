@@ -12,7 +12,7 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 from sensor_msgs.msg import Image, PointCloud2
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from std_msgs.msg import Int32
 import struct
 from sensor_msgs_py import point_cloud2
@@ -20,6 +20,7 @@ import casadi as ca
 from skimage.measure import ransac
 from skimage.transform import ProjectiveTransform, AffineTransform
 import tf_transformations
+from tf2_ros import TransformBroadcaster
 
 import sys
 import time
@@ -47,6 +48,8 @@ class FeaturePoints(Node):
             10)
 
         self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
+        self.pub_tf_broadcaster_ = TransformBroadcaster(self)
+
         self.br_ = CvBridge()
         
         FLANN_INDEX_LSH = 6
@@ -73,7 +76,8 @@ class FeaturePoints(Node):
         self.SE3 = se3._SE3()
         self.SO3 = so3._Dcm()
         self.Top_= self.SE3.exp(self.SE3.wedge([0,0,0,0,0,0]))
-        print("Resetting: ")
+        
+        self.Top_cum_ = self.Top_
 
     def Ad(self, T):
         C = T[:3,:3]
@@ -243,7 +247,7 @@ class FeaturePoints(Node):
                             # xyz_points = points_1
 
                             # Prune points that are too close or too far away from camera
-                            print("Points before xyz distance pruning: ", len(xyz_points))
+                            # print("Points before xyz distance pruning: ", len(xyz_points))
                             delete_ind_list = []
                             for lcv in range(len(xyz_points)):
                                 # Lower tolerance
@@ -255,7 +259,7 @@ class FeaturePoints(Node):
                             # Delete garbage points based on min/max depth limits
                             xyz_points_prev = np.delete(xyz_points_prev, delete_ind_list, 0)
                             xyz_points = np.delete(xyz_points, delete_ind_list, 0)
-                            print("Points remaining after xyz distance pruning: ", len(xyz_points))
+                            # print("Points remaining after xyz distance pruning: ", len(xyz_points))
 
                             ransacking = True
                             counter2=0                            
@@ -292,7 +296,7 @@ class FeaturePoints(Node):
                                 if counter2 >10:
                                     print("I'm getting lost here!")
                                     return
-                            print('num inliers',len(inliers))
+                            # print('num inliers',len(inliers))
 
                             matchesMask = [[1 if i in inliers else 0, 0] for i in range(len(matches))]
                             # print(matches)
@@ -330,20 +334,35 @@ class FeaturePoints(Node):
                                     # print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
                                     # print(self.Top_)
 
+                                    self.Top_cum_ = np.linalg.inv(self.Top_)@self.Top_cum_
+
                                     # R = self.Top_[:3,:3]
                                     # print("R: ", R)
-                                    q = tf_transformations.quaternion_from_matrix(self.Top_)
+                                    q = tf_transformations.quaternion_from_matrix(self.Top_cum_)
 
                                     msg = PoseStamped()
-                                    msg.pose.position.x = self.Top_[0,3]
-                                    msg.pose.position.y = self.Top_[1,3]
-                                    msg.pose.position.z = self.Top_[2,3]
+                                    msg.pose.position.x = self.Top_cum_[0,3]
+                                    msg.pose.position.y = self.Top_cum_[1,3]
+                                    msg.pose.position.z = self.Top_cum_[2,3]
                                     msg.header.frame_id = "map"
                                     msg.pose.orientation.x = q[0]
                                     msg.pose.orientation.y = q[1]
                                     msg.pose.orientation.z = q[2]
                                     msg.pose.orientation.w = q[3]
                                     self.pub_pose_.publish(msg)
+
+                                    t = TransformStamped()
+                                    t.transform.translation.x = self.Top_cum_[0,3]
+                                    t.transform.translation.y = self.Top_cum_[1,3]
+                                    t.transform.translation.z = self.Top_cum_[2,3]
+                                    t.header.stamp = self.get_clock().now().to_msg()
+                                    t.header.frame_id = "map"
+                                    t.child_frame_id = "camera_frame"
+                                    t.transform.rotation.x = q[0]
+                                    t.transform.rotation.y = q[1]
+                                    t.transform.rotation.z = q[2]
+                                    t.transform.rotation.w = q[3]
+                                    self.pub_tf_broadcaster_.sendTransform(t)
                                 
 
                     else:
@@ -429,11 +448,8 @@ def main(args=None):
     rclpy.init(args=args)
     feature_points = FeaturePoints()
 
-
-
-
-    pr = cProfile.Profile()
-    pr.enable()
+    # pr = cProfile.Profile()
+    # pr.enable()
     
     try:
         rclpy.spin(feature_points)
@@ -441,12 +457,12 @@ def main(args=None):
     except KeyboardInterrupt as e:
         pass
 
-    pr.disable()
-    s = io.StringIO()
-    sortby = SortKey.CUMULATIVE
-    ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    ps.print_stats()
-    print(s.getvalue())
+    # pr.disable()
+    # s = io.StringIO()
+    # sortby = SortKey.CUMULATIVE
+    # ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+    # ps.print_stats()
+    # print(s.getvalue())
 
     rclpy.shutdown()
 
