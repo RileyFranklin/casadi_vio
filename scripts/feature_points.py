@@ -7,13 +7,15 @@ from pstats import SortKey
 
 import rclpy
 from rclpy.node import Node
+from rclpy.duration import Duration
 from cv_bridge import CvBridge
 
 import cv2
 import numpy as np
 from sensor_msgs.msg import Image, PointCloud2
-from geometry_msgs.msg import PoseStamped, TransformStamped
-from std_msgs.msg import Int32
+from geometry_msgs.msg import PoseStamped, TransformStamped, Point
+from visualization_msgs.msg import MarkerArray, Marker
+from std_msgs.msg import Int32, ColorRGBA
 import struct
 from sensor_msgs_py import point_cloud2
 import casadi as ca
@@ -49,6 +51,7 @@ class FeaturePoints(Node):
 
         self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
         self.pub_tf_broadcaster_ = TransformBroadcaster(self)
+        self.pub_marker_ = self.create_publisher(Marker, 'feature_markers', 10)
 
         self.br_ = CvBridge()
         
@@ -165,22 +168,22 @@ class FeaturePoints(Node):
                 for i,(m,n) in enumerate(matches):
                     if m.distance < 0.7*n.distance:
                         matchesMask[i]=[1,0]
-                draw_params = dict(matchColor = (0,255,0),
-                                singlePointColor = (255,0,0),
-                                matchesMask = matchesMask,
-                                flags = cv2.DrawMatchesFlags_DEFAULT)
+                # draw_params = dict(matchColor = (0,255,0),
+                #                 singlePointColor = (255,0,0),
+                #                 matchesMask = matchesMask,
+                #                 flags = cv2.DrawMatchesFlags_DEFAULT)
                 
-                img2 = cv2.drawMatchesKnn(
-                    img1=self.img_prev_, keypoints1=self.kp_prev_,
-                    img2=img, keypoints2=kp,
-                    matches1to2=matches,
-                    outImg=None,**draw_params)
+                # img2 = cv2.drawMatchesKnn(
+                #     img1=self.img_prev_, keypoints1=self.kp_prev_,
+                #     img2=img, keypoints2=kp,
+                #     matches1to2=matches,
+                #     outImg=None,**draw_params)
 
 
 
-                # Publish img2 to msg
-                out_msg = self.br_.cv2_to_imgmsg(img2, encoding='rgb8')
-                self.publisher_.publish(out_msg)
+                # # Publish img2 to msg
+                # out_msg = self.br_.cv2_to_imgmsg(img2, encoding='rgb8')
+                # self.publisher_.publish(out_msg)
 
                 # print("Before ratio test: ", len(matches))
                 # Get only the good matches
@@ -223,28 +226,60 @@ class FeaturePoints(Node):
                             xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
                             xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
 
-                            # # Hardcode box test problem
-                            # points_0 = np.array([
-                            #     [1, 0, 0],
-                            #     [0, 1, 0],
-                            #     [0, 0, 1],
-                            #     [1, 0, 1],
-                            #     [0, 1, 1],
-                            #     [1, 1, 0],
-                            #     [1, 1, 1],
-                            #     [0, 1, 1],
-                            # ])
-                            # R_true = BF_PCA.euler2rot(1, 0.5, -1)
-                            # t_true = np.array([[0],
-                            #                 [0],
-                            #                 [0],
-                            #                 ])
-                            # T_01_true = np.vstack([np.hstack([R_true, t_true]), np.array([[0, 0, 0, 1]])])
-                            # T_01_true
-                            # points_1 = BF_PCA.applyT(points_0, T_01_true)
-                            # # print('T_01_true:', T_01_true)
-                            # xyz_points_prev = points_0
-                            # xyz_points = points_1
+                            camera_link_R = np.array([
+                                [0.0, 0.0, 1.000],
+                                [-1.000, 0.0, 0.0],
+                                [0.0, -1.000, 0.0],
+                                ]).T
+                            xyz_points_prev = xyz_points_prev@camera_link_R
+                            xyz_points = xyz_points@camera_link_R
+
+                            # Hardcode box test problem
+                            points_0 = np.array([
+                                [1, 0, 0],
+                                [0, 1, 0],
+                                [0, 0, 1],
+                                [1, 0, 1],
+                                [0, 1, 1],
+                                [1, 1, 0],
+                                [1, 1, 1],
+                                [0, 1, 1],
+                                [1, 0, 0],
+                                [0, 1, 0],
+                                [0, 0, 1],
+                                [1, 0, 1],
+                                [0, 1, 1],
+                                [1, 1, 0],
+                                [1, 1, 1],
+                                [0, 1, 1],
+                                [1, 0, 0],
+                                [0, 1, 0],
+                                [0, 0, 1],
+                                [1, 0, 1],
+                                [0, 1, 1],
+                                [1, 1, 0],
+                                [1, 1, 1],
+                                [0, 1, 1],
+                                [1, 0, 0],
+                                [0, 1, 0],
+                                [0, 0, 1],
+                                [1, 0, 1],
+                                [0, 1, 1],
+                                [1, 1, 0],
+                                [1, 1, 1],
+                                [0, 1, 1],
+                            ])
+                            R_true = BF_PCA.euler2rot(1, 0.5, -1)
+                            t_true = np.array([[0],
+                                            [2],
+                                            [-3],
+                                            ])
+                            T_01_true = np.vstack([np.hstack([R_true, t_true]), np.array([[0, 0, 0, 1]])])
+                            T_01_true
+                            points_1 = BF_PCA.applyT(points_0, T_01_true)
+                            print('T_01_true:', T_01_true)
+                            xyz_points_prev = points_0
+                            xyz_points = points_1
 
                             # Prune points that are too close or too far away from camera
                             # print("Points before xyz distance pruning: ", len(xyz_points))
@@ -296,23 +331,23 @@ class FeaturePoints(Node):
                                 if counter2 >10:
                                     print("I'm getting lost here!")
                                     return
-                            # print('num inliers',len(inliers))
+                            print('num inliers',len(inliers))
 
-                            matchesMask = [[1 if i in inliers else 0, 0] for i in range(len(matches))]
-                            # print(matches)
-                            draw_params = dict(matchColor = (0,255,0),
-                                singlePointColor = (255,0,0),
-                                matchesMask = matchesMask,
-                                flags = cv2.DrawMatchesFlags_DEFAULT)
-                            img3 = cv2.drawMatchesKnn(
-                                img1=self.img_prev_, keypoints1=self.kp_prev_,
-                                img2=img, keypoints2=kp,
-                                matches1to2=matches,
-                                outImg=None,**draw_params)
+                            # matchesMask = [[1 if i in inliers else 0, 0] for i in range(len(matches))]
+                            # # print(matches)
+                            # draw_params = dict(matchColor = (0,255,0),
+                            #     singlePointColor = (255,0,0),
+                            #     matchesMask = matchesMask,
+                            #     flags = cv2.DrawMatchesFlags_DEFAULT)
+                            # img3 = cv2.drawMatchesKnn(
+                            #     img1=self.img_prev_, keypoints1=self.kp_prev_,
+                            #     img2=img, keypoints2=kp,
+                            #     matches1to2=matches,
+                            #     outImg=None,**draw_params)
 
-                            # Publish img2 to msg
-                            out_msg = self.br_.cv2_to_imgmsg(img3, encoding='rgb8')
-                            self.pub_ransac_img_.publish(out_msg)
+                            # # Publish img2 to msg
+                            # out_msg = self.br_.cv2_to_imgmsg(img3, encoding='rgb8')
+                            # self.pub_ransac_img_.publish(out_msg)
                             
                             if len(xyz_points) > 2:
                                 algopt = np.array([0,0,0,0,0,0])
@@ -332,18 +367,21 @@ class FeaturePoints(Node):
                                     converge_time = end_time - start_time
                                     
                                     # print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
-                                    # print(self.Top_)
+                                    print("self.Top_: ", self.Top_)
 
-                                    self.Top_cum_ = np.linalg.inv(self.Top_)@self.Top_cum_
+                                    self.Top_cum_ = self.Top_
 
-                                    # R = self.Top_[:3,:3]
-                                    # print("R: ", R)
+                                    R = self.Top_[:3,:3]
                                     q = tf_transformations.quaternion_from_matrix(self.Top_cum_)
 
+                                    t_rot = self.Top_cum_[0:3,3]
+                                    # print(t_rot.shape)
+                                    t_act = -self.Top_[:3,:3].T@t_rot
+
                                     msg = PoseStamped()
-                                    msg.pose.position.x = self.Top_cum_[0,3]
-                                    msg.pose.position.y = self.Top_cum_[1,3]
-                                    msg.pose.position.z = self.Top_cum_[2,3]
+                                    msg.pose.position.x = t_act[0]
+                                    msg.pose.position.y = t_act[1]
+                                    msg.pose.position.z = t_act[2]
                                     msg.header.frame_id = "map"
                                     msg.pose.orientation.x = q[0]
                                     msg.pose.orientation.y = q[1]
@@ -352,17 +390,44 @@ class FeaturePoints(Node):
                                     self.pub_pose_.publish(msg)
 
                                     t = TransformStamped()
-                                    t.transform.translation.x = self.Top_cum_[0,3]
-                                    t.transform.translation.y = self.Top_cum_[1,3]
-                                    t.transform.translation.z = self.Top_cum_[2,3]
+                                    t.transform.translation.x = t_act[0]
+                                    t.transform.translation.y = t_act[1]
+                                    t.transform.translation.z = t_act[2]
                                     t.header.stamp = self.get_clock().now().to_msg()
                                     t.header.frame_id = "map"
-                                    t.child_frame_id = "camera_frame"
+                                    t.child_frame_id = "vehicle_frame"
                                     t.transform.rotation.x = q[0]
                                     t.transform.rotation.y = q[1]
                                     t.transform.rotation.z = q[2]
                                     t.transform.rotation.w = q[3]
                                     self.pub_tf_broadcaster_.sendTransform(t)
+
+                                    # Publish a pointcloud of matched points
+
+                                    msg = Marker()
+                                    msg.type = Marker.POINTS
+                                    msg.scale.x = 0.1
+                                    msg.scale.y = 0.1
+                                    msg.scale.z = 0.1
+                                    # msg.lifetime = Duration(seconds=1).to_msg()
+                                    msg.header.frame_id = "map"
+                                    msg.header.stamp = self.get_clock().now().to_msg()
+                                    msg.action = Marker.ADD
+                                    white = ColorRGBA()
+                                    white.r = 1.0
+                                    white.g = 1.0
+                                    white.b = 1.0
+                                    white.a = 1.0
+                                    for point in xyz_points:
+                                        msg_point = Point()
+                                        msg_point.x = float(point[0])
+                                        msg_point.y = float(point[1])
+                                        msg_point.z = float(point[2])
+
+
+                                        msg.points.append(msg_point)
+                                        msg.colors.append(white)
+                                    self.pub_marker_.publish(msg)
                                 
 
                     else:
@@ -379,6 +444,7 @@ class FeaturePoints(Node):
                 # self.v_=int(round(self.v_))
 
                 # Update previous values in self
+                # Only overwrite previous if saw something good
                 self.kp_prev_ = kp
                 self.des_prev_ = des
                 self.img_prev_ = img 

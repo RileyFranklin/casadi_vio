@@ -34,18 +34,7 @@ def generate_launch_description():
            ],
            arguments=[
                "0", "0", "0", "0", "0", "0",
-               "map", "test_frame"]
-        ),
-        Node(
-           package='tf2_ros',
-           output='log',
-           executable='static_transform_publisher',
-           parameters=[
-             {'use_sim_time': use_sim_time}
-           ],
-           arguments=[
-               "0", "0", "0", "-0.5", "0.5", "-0.5", "0.5",
-               "camera_frame", "camera_color_optical_frame"]
+               "vehicle_frame", "camera_link"]
         ),
         Node(
             package='rviz2',
