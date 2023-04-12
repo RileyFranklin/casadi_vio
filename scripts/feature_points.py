@@ -151,7 +151,8 @@ class FeaturePoints(Node):
                 self.des_prev_ = des
                 self.img_prev_ = img
             # Catches if zero features are calculated.
-            elif (len(kp) > 0) and (len(self.kp_prev_) > 0):
+            # elif (len(kp) > 0) and (len(self.kp_prev_) > 0):
+            elif True:
                 # matches = self.flann_.knnMatch(np.float32(des),np.float32(self.des_prev_),k=2)
                 # matches = self.flann_.knnMatch(des, self.des_prev_, k=2)
                 matches = self.flann_.knnMatch(self.des_prev_, des, k=2)
@@ -201,8 +202,8 @@ class FeaturePoints(Node):
                     list_pxl_prev = []
                     list_pxl = []
                     # Skips xyz point collection if not enough features are detected.
-                    if not (len(kp) < self.nfeatures) and not (len(self.kp_prev_) < self.nfeatures):
-                    # if True:
+                    # if not (len(kp) < self.nfeatures) and not (len(self.kp_prev_) < self.nfeatures):
+                    if True:
 
                         # For each match...
                         for mat in matches:
@@ -277,7 +278,7 @@ class FeaturePoints(Node):
                             ransacking = True
                             counter2=0              
                             while ransacking ==True:
-                                rand_ints=np.sort(np.random.choice(len(xyz_points),5,replace=False))
+                                rand_ints=np.sort(np.random.choice(len(xyz_points),10,replace=False))
                                 rand_ints= rand_ints[::-1]
                                 prev_points_rand=xyz_points_prev[rand_ints,:]
                                 points_rand=xyz_points[rand_ints,:]
@@ -300,15 +301,15 @@ class FeaturePoints(Node):
                                     self.ransac_T = self.SE3.exp(self.SE3.wedge(algopt))@self.ransac_T
                                     counter +=1
                                 for i in unsorted:
-                                    if np.linalg.norm(np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T - self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T))<0.05:
+                                    if np.linalg.norm(np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T - self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T))<0.1:
                                         inliers = np.append(inliers,i)
-                                if len(inliers)>np.floor(0.5*len(xyz_points)):
+                                if len(inliers)>np.floor(0.6*len(xyz_points)):
                                     xyz_points=xyz_points[inliers,:]
                                     xyz_points_prev=xyz_points_prev[inliers,:]
                                     ransacking=False
                                 #else:
                                     #print('failure to find adequate guess')
-                                if counter2 >10:
+                                if counter2 > 100:
                                     print("I'm getting lost here!")
                                     return
                             print('num inliers',len(inliers))
@@ -361,9 +362,9 @@ class FeaturePoints(Node):
                                     msg.pose.position.y = t_act[1]
                                     msg.pose.position.z = t_act[2]
                                     msg.header.frame_id = "map"
-                                    msg.pose.orientation.x = q[0]
-                                    msg.pose.orientation.y = q[1]
-                                    msg.pose.orientation.z = q[2]
+                                    msg.pose.orientation.x = -q[0]
+                                    msg.pose.orientation.y = -q[1]
+                                    msg.pose.orientation.z = -q[2]
                                     msg.pose.orientation.w = q[3]
                                     self.pub_pose_.publish(msg)
 
@@ -374,9 +375,9 @@ class FeaturePoints(Node):
                                     t.header.stamp = self.get_clock().now().to_msg()
                                     t.header.frame_id = "map"
                                     t.child_frame_id = "vehicle_frame"
-                                    t.transform.rotation.x = q[0]
-                                    t.transform.rotation.y = q[1]
-                                    t.transform.rotation.z = q[2]
+                                    t.transform.rotation.x = -q[0]
+                                    t.transform.rotation.y = -q[1]
+                                    t.transform.rotation.z = -q[2]
                                     t.transform.rotation.w = q[3]
                                     self.pub_tf_broadcaster_.sendTransform(t)
 

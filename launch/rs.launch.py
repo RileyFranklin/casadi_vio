@@ -25,6 +25,9 @@ def generate_launch_description():
         		'pointcloud.ordered_pc': 'true',
                 'rgb_camera.enable_auto_exposure': 'false',
                 'depth.enable_auto_exposure': 'false',
+                # 'depth_module.hdr_enable': 'true',
+                # 'enable_sync': 'true',
+                'json_file_path': [get_package_share_directory('casadi_vio') ,'/config/rs_vio.json'],
                 }.items(),
         ),
         Node(

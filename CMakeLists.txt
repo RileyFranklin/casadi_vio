@@ -27,6 +27,7 @@ install(DIRECTORY
 
 install(PROGRAMS
 	scripts/feature_points.py
+  scripts/depth_from_pc.py
 	DESTINATION lib/${PROJECT_NAME}
 	)
 
