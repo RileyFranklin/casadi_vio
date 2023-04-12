@@ -23,6 +23,8 @@ def generate_launch_description():
                 'depth_module.profile': '848,480,60',
                 'rgb_camera.profile': '848,480,60',
         		'pointcloud.ordered_pc': 'true',
+                'rgb_camera.enable_auto_exposure': 'false',
+                'depth.enable_auto_exposure': 'false',
                 }.items(),
         ),
         Node(
@@ -46,9 +48,9 @@ def generate_launch_description():
             parameters=[{'use_sim_time': use_sim_time}],
             on_exit=Shutdown(),
         ),
-        Node(
-            package='casadi_vio',
-            executable='depth_from_pc.py',
-        ),
+        # Node(
+        #     package='casadi_vio',
+        #     executable='depth_from_pc.py',
+        # ),
         #Node(package='casadi_vio', executable='feature_points.py', output='screen')
     ])

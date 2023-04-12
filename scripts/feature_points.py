@@ -69,7 +69,7 @@ class FeaturePoints(Node):
         self.point_cloud_=None
         self.pc_prev = None
         self.pc = None
-        self.nfeatures = 250
+        self.nfeatures = 500
         self.u_=10
         self.v_=12
         self.depth_min_lim = 0.1
@@ -81,6 +81,7 @@ class FeaturePoints(Node):
         self.Top_= self.SE3.exp(self.SE3.wedge([0,0,0,0,0,0]))
         
         self.Top_cum_ = self.Top_
+        self.motion_counter_ = 0
 
     def Ad(self, T):
         C = T[:3,:3]
@@ -222,64 +223,40 @@ class FeaturePoints(Node):
 
                         # Use get_points_efficient to get xyz points for all good matches
                         if self.pc_prev is not None:
-                                                        
+
+                            # Using Depth Camera                            
                             xyz_points_prev = self.read_points_efficient(self.pc_prev, uvs=list_pxl_prev, field_names = ("x", "y", "z"))
                             xyz_points = self.read_points_efficient(self.pc, uvs=list_pxl, field_names = ("x", "y", "z"))
 
+                            # print("xyz_points_prev: ", xyz_points_prev[0:5,:])
+                            # print("xyz_points_prev: ", xyz_points[0:5,:])
+
                             camera_link_R = np.array([
-                                [0.0, 0.0, 1.000],
-                                [-1.000, 0.0, 0.0],
-                                [0.0, -1.000, 0.0],
+                                [0.0, 0.0, 1.0],
+                                [-1.0, 0.0, 0.0],
+                                [0.0, -1.0, 0.0],
                                 ]).T
                             xyz_points_prev = xyz_points_prev@camera_link_R
                             xyz_points = xyz_points@camera_link_R
 
-                            # Hardcode box test problem
-                            points_0 = np.array([
-                                [1, 0, 0],
-                                [0, 1, 0],
-                                [0, 0, 1],
-                                [1, 0, 1],
-                                [0, 1, 1],
-                                [1, 1, 0],
-                                [1, 1, 1],
-                                [0, 1, 1],
-                                [1, 0, 0],
-                                [0, 1, 0],
-                                [0, 0, 1],
-                                [1, 0, 1],
-                                [0, 1, 1],
-                                [1, 1, 0],
-                                [1, 1, 1],
-                                [0, 1, 1],
-                                [1, 0, 0],
-                                [0, 1, 0],
-                                [0, 0, 1],
-                                [1, 0, 1],
-                                [0, 1, 1],
-                                [1, 1, 0],
-                                [1, 1, 1],
-                                [0, 1, 1],
-                                [1, 0, 0],
-                                [0, 1, 0],
-                                [0, 0, 1],
-                                [1, 0, 1],
-                                [0, 1, 1],
-                                [1, 1, 0],
-                                [1, 1, 1],
-                                [0, 1, 1],
-                            ])
-                            R_true = BF_PCA.euler2rot(1, 0.5, -1)
-                            t_true = np.array([[0],
-                                            [2],
-                                            [-3],
-                                            ])
-                            T_01_true = np.vstack([np.hstack([R_true, t_true]), np.array([[0, 0, 0, 1]])])
-                            T_01_true
-                            points_1 = BF_PCA.applyT(points_0, T_01_true)
-                            print('T_01_true:', T_01_true)
-                            xyz_points_prev = points_0
-                            xyz_points = points_1
+                            homo_xyz_points_prev = np.hstack((xyz_points_prev, np.ones([xyz_points_prev.shape[0],1])))
+                            xyz_points_prev = np.linalg.inv(self.Top_)@homo_xyz_points_prev.T
+                            xyz_points_prev = xyz_points_prev[0:3,:].T
+
+                            # # Hardcode box test problem
+                            # self.motion_counter_ += 1
+                            # points_map, points_meas, points_meas_prev = self.box_test_case(self.motion_counter_)
+                            
+                            # xyz_points = points_meas
+                            # xyz_points_prev = points_meas_prev
+
+                            # homo_xyz_points_prev = np.hstack((xyz_points_prev, np.ones([xyz_points_prev.shape[0],1])))
+                            # xyz_points_prev = np.linalg.inv(self.Top_)@homo_xyz_points_prev.T
+                            # xyz_points_prev = xyz_points_prev[0:3,:].T
+
+                            # print("xyz_points: ", xyz_points[0:5,:])
+                            # print("xyz_points_prev: ", xyz_points_prev[0:5,:])
+                            
 
                             # Prune points that are too close or too far away from camera
                             # print("Points before xyz distance pruning: ", len(xyz_points))
@@ -296,16 +273,16 @@ class FeaturePoints(Node):
                             xyz_points = np.delete(xyz_points, delete_ind_list, 0)
                             # print("Points remaining after xyz distance pruning: ", len(xyz_points))
 
+                            print("num xyz_points: ", len(xyz_points))
                             ransacking = True
-                            counter2=0                            
+                            counter2=0              
                             while ransacking ==True:
                                 rand_ints=np.sort(np.random.choice(len(xyz_points),5,replace=False))
                                 rand_ints= rand_ints[::-1]
                                 prev_points_rand=xyz_points_prev[rand_ints,:]
                                 points_rand=xyz_points[rand_ints,:]
-                                algopt = np.array([0,0,0,0,0,0])
-                                self.ransac_T=self.SE3.exp(self.SE3.wedge(algopt))
-                                algoptprev=None
+                                
+                                self.ransac_T = self.Top_
                                 unsorted = np.array(range(len(xyz_points)))
                                 for i in rand_ints:
                                     unsorted = np.delete(unsorted,i)
@@ -314,15 +291,18 @@ class FeaturePoints(Node):
                                 counter2 += 1
                                 counter = 0
 
-                                while (algoptprev is None or np.linalg.norm(algopt-algoptprev)>1e-1) and counter<900:    
-                                    algoptprev = algopt
+                                algopt = None
+                                while (algopt is None or np.linalg.norm(algopt)>1e-3) and counter<900:
+                                    # try:    
                                     algopt = self.barfoot_solve(self.ransac_T,prev_points_rand,points_rand)
+                                    # except:
+                                    #     algopt = np.array([0,0,0,0,0,0])
                                     self.ransac_T = self.SE3.exp(self.SE3.wedge(algopt))@self.ransac_T
                                     counter +=1
                                 for i in unsorted:
-                                    if np.linalg.norm(np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T - self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T))<.1:
+                                    if np.linalg.norm(np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T - self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T))<0.05:
                                         inliers = np.append(inliers,i)
-                                if len(inliers)>40:
+                                if len(inliers)>np.floor(0.5*len(xyz_points)):
                                     xyz_points=xyz_points[inliers,:]
                                     xyz_points_prev=xyz_points_prev[inliers,:]
                                     ransacking=False
@@ -333,36 +313,34 @@ class FeaturePoints(Node):
                                     return
                             print('num inliers',len(inliers))
 
-                            # matchesMask = [[1 if i in inliers else 0, 0] for i in range(len(matches))]
-                            # # print(matches)
-                            # draw_params = dict(matchColor = (0,255,0),
-                            #     singlePointColor = (255,0,0),
-                            #     matchesMask = matchesMask,
-                            #     flags = cv2.DrawMatchesFlags_DEFAULT)
-                            # img3 = cv2.drawMatchesKnn(
-                            #     img1=self.img_prev_, keypoints1=self.kp_prev_,
-                            #     img2=img, keypoints2=kp,
-                            #     matches1to2=matches,
-                            #     outImg=None,**draw_params)
+                            matchesMask = [[1 if i in inliers else 0, 0] for i in range(len(matches))]
+                            # print(matches)
+                            draw_params = dict(matchColor = (0,255,0),
+                                singlePointColor = (255,0,0),
+                                matchesMask = matchesMask,
+                                flags = cv2.DrawMatchesFlags_DEFAULT)
+                            img3 = cv2.drawMatchesKnn(
+                                img1=self.img_prev_, keypoints1=self.kp_prev_,
+                                img2=img, keypoints2=kp,
+                                matches1to2=matches,
+                                outImg=None,**draw_params)
 
-                            # # Publish img2 to msg
-                            # out_msg = self.br_.cv2_to_imgmsg(img3, encoding='rgb8')
-                            # self.pub_ransac_img_.publish(out_msg)
+                            # Publish img2 to msg
+                            out_msg = self.br_.cv2_to_imgmsg(img3, encoding='rgb8')
+                            self.pub_ransac_img_.publish(out_msg)
                             
                             if len(xyz_points) > 2:
-                                algopt = np.array([0,0,0,0,0,0])
                 
-                                algoptprev = None
                                 #----- Point Cloud Alignment, iterative optimization for each time step k -------
                                 counter = 0
                                 if self.img_prev_ is not None:
                                     start_time = time.time()
-                                    #  and counter<200
-                                    while (algoptprev is None or np.linalg.norm(algopt-algoptprev)>1e-4):    
-                                        algoptprev = algopt
+                                    algopt = None
+                                    while (algopt is None or np.linalg.norm(algopt)>1e-10):    
                                         algopt = self.barfoot_solve(self.Top_,xyz_points_prev,xyz_points)
                                         self.Top_ = self.SE3.exp(self.SE3.wedge(algopt))@self.Top_
                                         counter += 1
+                                    # print("algopt: ", algopt)
                                     end_time = time.time()
                                     converge_time = end_time - start_time
                                     
@@ -406,10 +384,10 @@ class FeaturePoints(Node):
 
                                     msg = Marker()
                                     msg.type = Marker.POINTS
-                                    msg.scale.x = 0.1
-                                    msg.scale.y = 0.1
-                                    msg.scale.z = 0.1
-                                    # msg.lifetime = Duration(seconds=1).to_msg()
+                                    msg.scale.x = 0.01
+                                    msg.scale.y = 0.01
+                                    msg.scale.z = 0.01
+                                    msg.lifetime = Duration(seconds=10).to_msg()
                                     msg.header.frame_id = "map"
                                     msg.header.stamp = self.get_clock().now().to_msg()
                                     msg.action = Marker.ADD
@@ -418,12 +396,11 @@ class FeaturePoints(Node):
                                     white.g = 1.0
                                     white.b = 1.0
                                     white.a = 1.0
-                                    for point in xyz_points:
+                                    for point in xyz_points_prev:
                                         msg_point = Point()
                                         msg_point.x = float(point[0])
                                         msg_point.y = float(point[1])
                                         msg_point.z = float(point[2])
-
 
                                         msg.points.append(msg_point)
                                         msg.colors.append(white)
@@ -447,7 +424,7 @@ class FeaturePoints(Node):
                 # Only overwrite previous if saw something good
                 self.kp_prev_ = kp
                 self.des_prev_ = des
-                self.img_prev_ = img 
+                self.img_prev_ = img
 
             else:
                 print("Zero features found. Skipping frame...")
@@ -471,9 +448,55 @@ class FeaturePoints(Node):
             self.pc_prev = self.pc
             self.pc = msg
 
-
-
         return
+    
+    def box_test_case(self, motion_counter):
+        # Define points in world ("map") frame
+        points_map = np.array([
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 1],
+            [0, 1, 1],
+            [1, 1, 0],
+            [1, 1, 1],
+            ])*2
+        points_map = np.tile(points_map,(20,1))
+
+        # Define velocity and euler angle rotations as a function of time_step
+        # roll z, roll y, roll x
+        omega = [0.05, 0.0, 0.0]
+        # trans x, trans y, trans z
+        v = -np.array([[0.0],
+                    [0.0],
+                    [0.0],
+                    ])
+
+        # Define rotation and translation for current time step
+        R_true = BF_PCA.euler2rot(omega[0]*motion_counter, omega[1]*motion_counter, omega[2]*motion_counter)
+        t_true = v*motion_counter
+        
+        # Craft the "truth" transformation matrix
+        T_01_true = np.vstack([np.hstack([R_true, t_true]), np.array([[0, 0, 0, 1]])])
+        
+        # Apply the "truth" transformation matrix to all points_map
+        points_meas = BF_PCA.applyT(points_map, T_01_true)
+
+        # Define rotation and translation for current time step
+        motion_counter = motion_counter - 1
+        R_true_prev = BF_PCA.euler2rot(omega[0]*motion_counter, omega[1]*motion_counter, omega[2]*motion_counter)
+        t_true_prev = v*motion_counter
+        
+        # Craft the "truth" transformation matrix
+        T_01_true_prev = np.vstack([np.hstack([R_true_prev, t_true_prev]), np.array([[0, 0, 0, 1]])])
+        
+        # Apply the "truth" transformation matrix to all points_map
+        points_meas_prev = BF_PCA.applyT(points_map, T_01_true_prev)
+        
+        # print('T_01_true:', T_01_true)
+
+        return points_map, points_meas, points_meas_prev
+
     
     def read_points_efficient(
         self,
