@@ -75,7 +75,7 @@ class FeaturePoints(Node):
         self.depth_min_lim = 0.1
         self.depth_max_lim = 5
         self.ransac_T=None
-        self.ransac_threshold = .02
+        self.ransac_threshold = .1
         self.SE3 = se3._SE3()
         self.SO3 = so3._Dcm()
         self.Top_= self.SE3.exp(self.SE3.wedge([0,0,0,0,0,0]))
@@ -317,35 +317,43 @@ class FeaturePoints(Node):
                             self.ransac_T=self.ransac_T@self.Top_
 
                             unsorted = np.array(range(len(xyz_points)))
-                            
+                            xyz_clean=xyz_points
+                            xyz_prev_clean=xyz_points_prev
                             inliers=[]
-                            for i in unsorted:
+                            for i in unsorted[::-1]:
                                     y=np.expand_dims(np.append(xyz_points[i,:],1),axis=0).T
                                     z=self.ransac_T@(np.expand_dims(np.append(xyz_points_prev[i,:],1),axis=0).T)
                                     #print('y',y)
                                     #print('z',z)
                                     if np.linalg.norm(y-z)<self.ransac_threshold:
                                         inliers = np.append(inliers,i)
+                                    else:
+                                        xyz_clean=np.delete(xyz_clean, i, 0)
+                                        xyz_prev_clean=np.delete(xyz_prev_clean, i, 0)
+                                        
                             print('inliers: ',len(inliers))
+                            print('pre clean',np.shape(xyz_points))
+                            print('post clean', np.shape(xyz_clean))
                             print('ransac T',self.ransac_T)
                             matchesMask = [[1 if i in inliers else 0, 0] for i in range(len(matches))]
                             # print(matches)
-                            draw_params = dict(matchColor = (0,255,0),
-                                singlePointColor = (255,0,0),
-                                matchesMask = matchesMask,
-                                flags = cv2.DrawMatchesFlags_DEFAULT)
-                            img3 = cv2.drawMatchesKnn(
-                                img1=self.img_prev_, keypoints1=self.kp_prev_,
-                                img2=img, keypoints2=kp,
-                                matches1to2=matches,
-                                outImg=None,**draw_params)
+                            # draw_params = dict(matchColor = (0,255,0),
+                            #     singlePointColor = (255,0,0),
+                            #     matchesMask = matchesMask,
+                            #     flags = cv2.DrawMatchesFlags_DEFAULT)
+                            # img3 = cv2.drawMatchesKnn(
+                            #     img1=self.img_prev_, keypoints1=self.kp_prev_,
+                            #     img2=img, keypoints2=kp,
+                            #     matches1to2=matches,
+                            #     outImg=None,**draw_params)
 
-                            # Publish img2 to msg
-                            out_msg = self.br_.cv2_to_imgmsg(img3, encoding='rgb8')
-                            self.pub_ransac_img_.publish(out_msg)
+                            # # Publish img2 to msg
+                            # out_msg = self.br_.cv2_to_imgmsg(img3, encoding='rgb8')
+                            # self.pub_ransac_img_.publish(out_msg)
                             
                             if len(xyz_points) > 2:
-                
+                                xyz_points=xyz_clean
+                                xyz_points_prev=xyz_prev_clean
                                 #----- Point Cloud Alignment, iterative optimization for each time step k -------
                                 counter = 0
                                 if self.img_prev_ is not None:
