@@ -122,17 +122,6 @@ class Odometry(Node):
         # print(t_rot.shape)
         # t_act = -self.Top_[:3,:3].T@t_rot
 
-        msg = PoseStamped()
-        msg.pose.position.x = float(t_vec[0])
-        msg.pose.position.y = float(t_vec[1])
-        msg.pose.position.z = float(t_vec[2])
-        msg.header.frame_id = "map"
-        msg.pose.orientation.x = -q[0]
-        msg.pose.orientation.y = -q[1]
-        msg.pose.orientation.z = -q[2]
-        msg.pose.orientation.w = q[3]
-        self.pub_pose_.publish(msg)
-
         t = TransformStamped()
         t.transform.translation.x = float(t_vec[0])
         t.transform.translation.y = float(t_vec[1])
@@ -140,11 +129,22 @@ class Odometry(Node):
         t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = "map"
         t.child_frame_id = "vehicle_frame"
-        t.transform.rotation.x = -q[0]
-        t.transform.rotation.y = -q[1]
-        t.transform.rotation.z = -q[2]
+        t.transform.rotation.x = -q[2]
+        t.transform.rotation.y = -q[0]
+        t.transform.rotation.z = -q[1]
         t.transform.rotation.w = q[3]
         self.pub_tf_broadcaster_.sendTransform(t)
+
+        msg = PoseStamped()
+        msg.pose.position.x = float(t_vec[0])
+        msg.pose.position.y = float(t_vec[1])
+        msg.pose.position.z = float(t_vec[2])
+        msg.header.frame_id = "map"
+        msg.pose.orientation.x = -q[2]
+        msg.pose.orientation.y = -q[0]
+        msg.pose.orientation.z = -q[1]
+        msg.pose.orientation.w = q[3]
+        self.pub_pose_.publish(msg)
 
     # def save_data(self):
     #     np.save("out", self.trajectory)
