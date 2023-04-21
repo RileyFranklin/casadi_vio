@@ -50,6 +50,7 @@ class Odometry(Node):
         self.br = CvBridge()
         self.pointCloudFrame = None
         self.imageFrame = None
+        self.pointCloudFrame_last = None
         self.kp_last = None
         self.des_last = None
         self.imageFrame_last = None
@@ -65,7 +66,12 @@ class Odometry(Node):
         self.calc_pose()
 
     def callback_depth(self, pc_msg):
-        self.pointCloudFrame = pc_msg
+        if self.pointCloudFrame_last == None:
+            self.pointCloudFrame=pc_msg
+            self.pointCloudFrame_last=pc_msg
+        else:
+            self.pointCloudFrame_last=self.pointCloudFrame
+            self.pointCloudFrame = pc_msg
 
     def calc_pose(self):
         # Stream RGB Video
@@ -95,7 +101,7 @@ class Odometry(Node):
                 # Estimate Change in Pose
                 pose_perturb = estimate_motion(matches, self.kp_last, kp, self.k, self.pointCloudFrame)
 
-                pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame,self.pointCloudFrame,np.linalg.inv(pose_perturb))
+                pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame,self.pointCloudFrame ,np.linalg.inv(pose_perturb))
                 # Update Current Position
                 print('step rasnac:',np.linalg.inv(pose_perturb))
                 print('step barfoot:',pose_perturb_bar)

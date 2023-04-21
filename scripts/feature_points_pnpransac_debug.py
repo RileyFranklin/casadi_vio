@@ -26,33 +26,33 @@ from tf2_ros import TransformBroadcaster
 
 import sys
 import time
-sys.path.insert(0, '/home/purt/Github/RileyFranklin/pyecca')
+sys.path.insert(0, '/home/purt-admin/git/pyecca')
 from pyecca.lie_numpy import se3, so3
 
-sys.path.insert(0, '/home/purt/Github/RileyFranklin/pyecca/notebooks/BA')
+sys.path.insert(0, '/home/purt-admin/git/pyecca/notebooks/BA')
 import BF_PCA
 
 class FeaturePoints(Node):
 
     def __init__(self):
         super().__init__('feature_points')
-        self.subscription_ = self.create_subscription(
-            Image,
-            '/camera/color/image_raw',
-            self.listener_callback,
-            10)
+        # self.subscription_ = self.create_subscription(
+        #     Image,
+        #     '/camera/color/image_raw',
+        #     self.listener_callback,
+        #     10)
         
-        self.publisher_ = self.create_publisher(Image, 'feature_points', 10)
-        self.pub_ransac_img_ = self.create_publisher(Image, 'ransac_feature_points', 10)
-        self.subscription_ = self.create_subscription(
-            PointCloud2,
-            '/camera/depth/color/points',
-            self.listener_callback_pc,
-            10)
+        # # self.publisher_ = self.create_publisher(Image, 'feature_points', 10)
+        # # self.pub_ransac_img_ = self.create_publisher(Image, 'ransac_feature_points', 10)
+        # self.subscription_ = self.create_subscription(
+        #     PointCloud2,
+        #     '/camera/depth/color/points',
+        #     self.listener_callback_pc,
+        #     10)
 
-        self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
-        self.pub_tf_broadcaster_ = TransformBroadcaster(self)
-        self.pub_marker_ = self.create_publisher(Marker, 'feature_markers', 10)
+        # self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
+        # self.pub_tf_broadcaster_ = TransformBroadcaster(self)
+        # self.pub_marker_ = self.create_publisher(Marker, 'feature_markers', 10)
 
         self.br_ = CvBridge()
         

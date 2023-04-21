@@ -15,13 +15,15 @@ from tf2_ros import TransformBroadcaster
 import tf_transformations
 from cv_bridge import CvBridge
 from voLib import *
+import sys
+import time
+import feature_points_pnpransac_debug
 
 # Debug flags
 stream_raw = False
 stream_keypoints = False
 stream_flann = False
 skip_match = False
-skip_estimate = False
 print_pose = False
 save_pose = True
 
@@ -44,16 +46,17 @@ class Odometry(Node):
         # Publishers
         self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
         self.pub_tf_broadcaster_ = TransformBroadcaster(self)
-
         # Defining Data
         self.trajectory = np.zeros((3, 1))
         self.br = CvBridge()
         self.pointCloudFrame = None
+        self.pointCloudFrame_last = None
         self.imageFrame = None
         self.kp_last = None
         self.des_last = None
-        self.imageFrame_last = None
+        self.skip_estimate = False
         self.pose = np.eye(4)
+        self.pose_bar = np.eye(4)
         self.k = np.array([[607.79150390625, 0, 319.30987548828125],
                            [0, 608.1211547851562, 236.9514617919922],
                            [0, 0, 1]], dtype=np.float32)
@@ -65,7 +68,15 @@ class Odometry(Node):
         self.calc_pose()
 
     def callback_depth(self, pc_msg):
-        self.pointCloudFrame = pc_msg
+
+        #should we use pointcloud from current for location of previous points?
+        #pointcloud is being published significantly slower than images
+        if self.pointCloudFrame_last == None:
+            self.pointCloudFrame=pc_msg
+            self.pointCloudFrame_last=pc_msg
+        else:
+            self.pointCloudFrame_last=self.pointCloudFrame
+            self.pointCloudFrame = pc_msg
 
     def calc_pose(self):
         # Stream RGB Video
@@ -81,24 +92,50 @@ class Odometry(Node):
         # Do Not Continue If First Frame
         if not skip_match and self.kp_last is not None and self.des_last is not None:
             # Detect Matches
-            matches = detect_matches(self.des_last, des)
-
-            # Filter Matches
-            matches = filter_matches(matches, 0.7)
+            ransacking =False
+            counter =0
+            if ransacking ==True:
+                    
+                while ransacking ==True:
+                    matches = detect_matches(self.des_last, des)
+                    counter =counter+1
+                    # Filter Matches
+                    matches = filter_matches(matches, 0.7)
+                    matches = ransac(matches,kp,self.kp_last)
+                    if len(matches)>100:
+                        self.skip_estimate =False
+                        ransacking=False
+                        # print(len(matches))
+                    
+                    if counter >9:
+                        self.skip_estimate =True
+                        ransacking=False
+            
+            else:
+                matches = detect_matches(self.des_last, des)
+                # Filter Matches
+                matches = filter_matches(matches, 0.7)
 
             # Stream Matches
             if stream_flann:
                 stream_matches(self.imageFrame_last, self.kp_last, self.imageFrame, kp, matches)
 
             # Estimate Motion
-            if not skip_estimate and self.pointCloudFrame is not None:
+            if not self.skip_estimate and self.pointCloudFrame is not None:
                 # Estimate Change in Pose
-                pose_perturb = estimate_motion(matches, self.kp_last, kp, self.k, self.pointCloudFrame)
-
+                #pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame, self.pointCloudFrame)
+                
+                pose_perturb = estimate_motion(matches, kp,self.kp_last, self.k, self.pointCloudFrame)
+                
+                print("incremental ransasc: ",pose_perturb)
+                pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame, self.pointCloudFrame,pose_perturb)
+                print("incremental barfoot: ",pose_perturb_bar)
                 # Update Current Position
-                self.pose = self.pose @ np.linalg.inv(pose_perturb)
-                print(self.pose)
-
+                #self.pose = self.pose@pose_perturb_bar
+                self.pose = self.pose@np.linalg.inv(pose_perturb)
+                #print("Transformation: ",self.pose)
+                #self.pose_bar=self.pose@np.linalg.inv(pose_perturb_bar)
+                #print("barfoot Transformation: ",self.pose_bar)
                 # Build Trajectory
                 coordinates = np.array([[self.pose[0, 3], self.pose[1, 3], self.pose[2, 3]]])
                 self.trajectory = np.concatenate((self.trajectory, coordinates.T), axis=1)
@@ -114,13 +151,22 @@ class Odometry(Node):
                         [-1.0, 0.0, 0.0, 0.0],
                         [0.0, -1.0, 0.0, 0.0],
                         [0.0, 0.0, 0.0, 1.0]])
-        corrected_pose = bigT @ self.pose
-
-        q = tf_transformations.quaternion_from_matrix(self.pose)
-
-        t_vec = corrected_pose[0:3,3]
+        self.pose_corrected = bigT @ self.pose
+        #print(self.pose)
+        q = tf_transformations.quaternion_from_matrix(self.pose_corrected)
         # print(t_rot.shape)
-        # t_act = -self.Top_[:3,:3].T@t_rot
+        t_vec = self.pose_corrected[:3,3]
+
+        msg = PoseStamped()
+        msg.pose.position.x = float(t_vec[0])
+        msg.pose.position.y = float(t_vec[1])
+        msg.pose.position.z = float(t_vec[2])
+        msg.header.frame_id = "map"
+        msg.pose.orientation.x = -q[0]
+        msg.pose.orientation.y = -q[1]
+        msg.pose.orientation.z = -q[2]
+        msg.pose.orientation.w = q[3]
+        self.pub_pose_.publish(msg)
 
         t = TransformStamped()
         t.transform.translation.x = float(t_vec[0])
@@ -128,26 +174,29 @@ class Odometry(Node):
         t.transform.translation.z = float(t_vec[2])
         t.header.stamp = self.get_clock().now().to_msg()
         t.header.frame_id = "map"
-        t.child_frame_id = "vehicle_frame"
-        t.transform.rotation.x = -q[2]
-        t.transform.rotation.y = -q[0]
-        t.transform.rotation.z = -q[1]
+        t.child_frame_id = "barfoot_vehicle"
+        t.transform.rotation.x = -q[0]
+        t.transform.rotation.y = -q[1]
+        t.transform.rotation.z = -q[2]
         t.transform.rotation.w = q[3]
         self.pub_tf_broadcaster_.sendTransform(t)
 
-        msg = PoseStamped()
-        msg.pose.position.x = float(t_vec[0])
-        msg.pose.position.y = float(t_vec[1])
-        msg.pose.position.z = float(t_vec[2])
-        msg.header.frame_id = "map"
-        msg.pose.orientation.x = -q[2]
-        msg.pose.orientation.y = -q[0]
-        msg.pose.orientation.z = -q[1]
-        msg.pose.orientation.w = q[3]
-        self.pub_pose_.publish(msg)
+        # t = TransformStamped()
+        # t.transform.translation.x = float(t_vec[0])
+        # t.transform.translation.y = float(t_vec[1])
+        # t.transform.translation.z = float(t_vec[2])
+        # t.header.stamp = self.get_clock().now().to_msg()
+        # t.header.frame_id = "map"
+        # t.child_frame_id = "vehicle_frame"
+        # t.transform.rotation.x = -q[0]
+        # t.transform.rotation.y = -q[1]
+        # t.transform.rotation.z = -q[2]
+        # t.transform.rotation.w = q[3]
+        # self.pub_tfransac_broadcaster_.sendTransform(t)
 
+        self.skip_estimate=False
     # def save_data(self):
-    #     np.save("out", self.trajectory)
+        np.save("test", self.trajectory)
 
 def main(args=None):
     rclpy.init(args=args)

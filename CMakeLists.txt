@@ -29,6 +29,8 @@ install(PROGRAMS
 	scripts/feature_points.py
   	scripts/depth_from_pc.py
   	scripts/run.py
+	scripts/run_barfoot.py
+	scripts/barfoot_ransac.py
 	DESTINATION lib/${PROJECT_NAME}
 	)
 

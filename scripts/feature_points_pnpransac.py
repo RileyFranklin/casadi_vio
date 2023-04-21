@@ -35,23 +35,23 @@ import BF_PCA
 class FeaturePoints(Node):
 
     def __init__(self):
-        super().__init__('feature_points')
-        self.subscription_ = self.create_subscription(
-            Image,
-            '/camera/color/image_raw',
-            self.listener_callback,
-            10)
-        self.publisher_ = self.create_publisher(Image, 'feature_points', 10)
-        self.pub_ransac_img_ = self.create_publisher(Image, 'ransac_feature_points', 10)
-        self.subscription_ = self.create_subscription(
-            PointCloud2,
-            '/camera/depth/color/points',
-            self.listener_callback_pc,
-            10)
+        # super().__init__('feature_points')
+        # self.subscription_ = self.create_subscription(
+        #     Image,
+        #     '/camera/color/image_raw',
+        #     self.listener_callback,
+        #     10)
+        # self.publisher_ = self.create_publisher(Image, 'feature_points', 10)
+        # self.pub_ransac_img_ = self.create_publisher(Image, 'ransac_feature_points', 10)
+        # self.subscription_ = self.create_subscription(
+        #     PointCloud2,
+        #     '/camera/depth/color/points',
+        #     self.listener_callback_pc,
+        #     10)
 
-        self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
-        self.pub_tf_broadcaster_ = TransformBroadcaster(self)
-        self.pub_marker_ = self.create_publisher(Marker, 'feature_markers', 10)
+        # self.pub_pose_ = self.create_publisher(PoseStamped, 'camera_pose', 10)
+        # self.pub_tf_broadcaster_ = TransformBroadcaster(self)
+        # self.pub_marker_ = self.create_publisher(Marker, 'feature_markers', 10)
 
         self.br_ = CvBridge()
         
@@ -105,7 +105,6 @@ class FeaturePoints(Node):
         I = 0
         for j in range(len(p)):
             pint0 = p[[j],:] - P
-
             I += self.SO3.wedge(pint0[0])@self.SO3.wedge(pint0[0])
         I=-I/len(p)
         
@@ -118,7 +117,6 @@ class FeaturePoints(Node):
         for j in range(len(y)):
             pj = p[[j],:]
             yj = y[[j],:]
-
             W += (yj-Y).T@(pj-P)
         W = W/len(y)
         
@@ -369,7 +367,6 @@ class FeaturePoints(Node):
                                     
                                     # print("Converged in " + str(counter) + " iterations in " + str(converge_time) + " seconds.")
                                     print("self.Top_: ", self.Top_)
-
                                     self.Top_cum_ = self.Top_
 
                                     R = self.Top_[:3,:3]
