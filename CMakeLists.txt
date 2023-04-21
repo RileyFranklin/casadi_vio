@@ -28,9 +28,9 @@ install(DIRECTORY
 install(PROGRAMS
 	scripts/feature_points.py
   	scripts/depth_from_pc.py
-  	scripts/run.py
 	scripts/run_barfoot.py
 	scripts/barfoot_ransac.py
+	scripts/feature_depth_sync.py
 	DESTINATION lib/${PROJECT_NAME}
 	)
 

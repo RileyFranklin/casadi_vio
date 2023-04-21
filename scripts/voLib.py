@@ -51,7 +51,7 @@ def estimate_motion(matches, kp_last, kp, k, pointCloud):
 
     return pose_perturb
 
-def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud,pointCloud_last,pose_perturb):
+def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud, pose_perturb, xyz_test_prev, xyz_test):
     # Declare lists and arrays
     # rmat = np.eye(3)
     # tvec = np.zeros((3, 1))
@@ -78,7 +78,7 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud,pointCloud_last,
 
     # Remove pixel locations if there is no corresponding point
     for point in range(len(points)):
-        if np.linalg.norm(points[point]) > 0 and np.linalg.norm(points[point]) <20 :
+        if np.linalg.norm(points[point]) > 0.05 and np.linalg.norm(points[point]) <20 :
             valid_points.append(points[point])
             valid_points_prev.append(points_prev[point])
             valid_pxl_list.append(pxl_list[point])
@@ -109,8 +109,8 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud,pointCloud_last,
         # print(pose_perturb)
         # print('transformed',z)
         # print('norm',np.linalg.norm(y-z))
-        if np.linalg.norm(y-z)<2:
-            if len(points_clean) ==0:
+        if np.linalg.norm(y-z) < 2:
+            if len(points_clean) == 0:
                 points_clean = valid_points[i]
                 points_clean_prev = valid_points_prev[i]
             else:        
@@ -119,6 +119,10 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud,pointCloud_last,
     print('valid_points',len(points_clean))
     valid_points=points_clean
     valid_points_prev=points_clean_prev    
+
+    if xyz_test is not None:
+        valid_points = xyz_test
+        valid_points_prev = xyz_test_prev
  
     if len(valid_points) > 5:
         print('success')
