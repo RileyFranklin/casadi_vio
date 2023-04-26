@@ -7,7 +7,7 @@ import numpy as np
 import array
 from sensor_msgs_py import point_cloud2
 from  feature_points_pnpransac_debug import FeaturePoints
-
+import random
 
 def estimate_motion(matches, kp_last, kp, k, pointCloud):
     # Declare lists and arrays
@@ -51,7 +51,7 @@ def estimate_motion(matches, kp_last, kp, k, pointCloud):
 
     return pose_perturb
 
-def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud, pose_perturb, xyz_test_prev, xyz_test):
+def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud,  xyz_test_prev, xyz_test):
     # Declare lists and arrays
     # rmat = np.eye(3)
     # tvec = np.zeros((3, 1))
@@ -102,23 +102,23 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud
     points_clean=inliers
     points_clean_prev=inliers
     
-    for i in range(len(valid_points)):
-        y=np.append(valid_points[i],1)
-        z=pose_perturb@(np.append(valid_points_prev[i],1)).T
-        # print('observed',y)
-        # print(pose_perturb)
-        # print('transformed',z)
-        # print('norm',np.linalg.norm(y-z))
-        if np.linalg.norm(y-z) < 2:
-            if len(points_clean) == 0:
-                points_clean = valid_points[i]
-                points_clean_prev = valid_points_prev[i]
-            else:        
-                points_clean=np.vstack((points_clean,valid_points[i]))
-                points_clean_prev=np.vstack((points_clean_prev,valid_points[i]))
-    print('valid_points',len(points_clean))
-    valid_points=points_clean
-    valid_points_prev=points_clean_prev    
+    # for i in range(len(valid_points)):
+    #     y=np.append(valid_points[i],1)
+    #     z=pose_perturb@(np.append(valid_points_prev[i],1)).T
+    #     # print('observed',y)
+    #     # print(pose_perturb)
+    #     # print('transformed',z)
+    #     # print('norm',np.linalg.norm(y-z))
+    #     if np.linalg.norm(y-z) < 2:
+    #         if len(points_clean) == 0:
+    #             points_clean = valid_points[i]
+    #             points_clean_prev = valid_points_prev[i]
+    #         else:        
+    #             points_clean=np.vstack((points_clean,valid_points[i]))
+    #             points_clean_prev=np.vstack((points_clean_prev,valid_points[i]))
+    # print('valid_points',len(points_clean))
+    # valid_points=points_clean
+    # valid_points_prev=points_clean_prev    
 
     if xyz_test is not None:
         valid_points = xyz_test
@@ -127,6 +127,9 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud
     if len(valid_points) > 5:
         print('success')
         P = np.average(valid_points_prev, axis=0)
+        print(valid_points_prev[:10,:])
+        Pexp_dim = np.average(valid_points_prev[:10,:], axis=0)
+        print(Pexp_dim)
         Y = np.average(valid_points,axis=0)
         I = 0
         for j in range(len(valid_points_prev)):
@@ -147,8 +150,11 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud
         #print('converged after ',counter,' iterations')
         r = Top_[0:3, 0:3]
         t = Top_[0:3, 3]
-
-        Top_[0:3, 3] = -r.T@t
+        # Top_[0:3,0:3]=r.T
+        # Top_[0:3, 3] = -r.T@t
+        print('algopt',feature.SE3.vee(feature.SE3.log(Top_)))
+        p_test = np.array([1,2,3,1])
+        print('T_op @ p_test: ', Top_ @ p_test)
         #print("algopt: ", algopt)
     else:
         print('fail')   
@@ -245,37 +251,163 @@ def stream_features(image, kp):
     # Draw Images
     cv2.imshow("Features", visual)
     cv2.waitKey(1)
-
-# def barfoot_solve_local( Top, p, y, M, W):
-#         #the incorporated weights assume that every landmark is observed len(y) = len(w) = len(p)
-# #         W = 0
-#         for j in range(len(y)):
-#             pj = valid_points_prev[j,:]
-#             yj = valid_points[j,:]
-
-#             W += (yj-Y).T@(pj-P)
-#         W = W/len(y)
-
-#         feature =FeaturePoints()
-#         Tau = feature.Ad(Top)
-#         Cop = Top[:3,:3]
-#         rop = -Cop.T@Top[:3,3]
+def barfoot_solve(valid_points, valid_points_prev):
+    Top_=np.eye(4)
+    feature=FeaturePoints()
+    # sample = random.sample(range(len(valid_points)),10)
+    # temp1=[]
+    # temp2=[]
+    # for i in sample:
+    #     temp1.append(valid_points[i])
+    #     temp2.append(valid_points_prev[i])
+    # valid_points_prev=np.array(temp2)
+    # valid_points=np.array(temp1)
         
-#         P = np.average(p,axis=0)
-#         Y = np.average(y,axis=0)
+    if len(valid_points) > 5:
+        P = np.average(valid_points_prev, axis=0)
+        
+        Y = np.average(valid_points,axis=0)
+        I = 0
+        for j in range(len(valid_points_prev)):
+            pint0 = valid_points_prev[j,:] - P
+            I += feature.SO3.wedge(pint0)@feature.SO3.wedge(pint0)
+        I=-I/len(valid_points_prev)
+        
+        M1 = np.vstack((np.hstack((np.eye(3), np.zeros([3,3]))), np.hstack((feature.SO3.wedge(P),np.eye(3)))))
+        M2 = np.vstack((np.hstack((np.eye(3), np.zeros([3,3]))), np.hstack((np.zeros([3,3]),I))))
+        M3 = np.vstack((np.hstack((np.eye(3), -feature.SO3.wedge(P))), np.hstack((np.zeros([3,3]),np.eye(3)))))
+        M=M1@M2@M3
+        algopt=None
+        counter=0
+        while (algopt is None or np.linalg.norm(algopt)>1e-12) and counter<100:    
+            algopt = feature.barfoot_solve(Top_, valid_points_prev, valid_points, M)
+            Top_ = feature.SE3.exp(feature.SE3.wedge(algopt))@Top_
+            counter += 1
+        #print('converged after ',counter,' iterations')
+        #r = Top_[0:3, 0:3]
+        #t = Top_[0:3, 3]
+
+        #Top_[0:3, 3] = -r.T@t
+        #print("algopt: ", algopt)
+    else:
+        print('not enough points seen')   
+
+    
+    #print('Top barfoot:',Top_)
+    
+    return Top_
+
+def estimate_motion_barfoot_ransac(matches, kp_last, kp, k, pointCloud_last, pointCloud,xyz_test_prev,xyz_test):
+    # Declare lists and arrays
+    # rmat = np.eye(3)
+    # tvec = np.zeros((3, 1))
+    pxl_list_last = []
+    pxl_list = []
+    points = []
+    valid_points = []
+    valid_points_prev=[]
+    valid_pxl_list = []
+    valid_pxl_list_prev = []
+    feature =FeaturePoints()
+    # Collect feature pixel locations
+    for match in matches:
+        x1, y1 = kp_last[match[0].queryIdx].pt
+        x2, y2 = kp[match[0].trainIdx].pt
+        pxl_list_last.append([int(x1), int(y1)])
+        pxl_list.append([int(x2), int(y2)])
+    
+   
+    # Read point cloud data
+    points = read_point_efficient(pointCloud, pxl_list)
+    points_prev = read_point_efficient(pointCloud_last, pxl_list_last)
+
+    # Remove pixel locations if there is no corresponding point
+    for point in range(len(points)):
+        if np.linalg.norm(points[point]) > 0.05 and np.linalg.norm(points[point]) <40 :
+            valid_points.append(points[point])
+            valid_points_prev.append(points_prev[point])
+            valid_pxl_list.append(pxl_list[point])
+            valid_pxl_list_prev.append(pxl_list_last[point])
+    valid_points_prev=np.vstack(valid_points_prev)    
+    valid_points=np.vstack(valid_points)   
+    print('pre-ransac',len(valid_points))
+
+    if xyz_test is not None:
+        valid_points = xyz_test
+        valid_points_prev = xyz_test_prev
+
+    ransacing = True
+    d=0
+    Top_d=np.eye(4)
+    counter=0
+    points_hold=[]
+    points_hold_prev=[]
+    hold=valid_points
+    print('matches',len(valid_points))
+    while ransacing:
+        orig_points=len(valid_points)
+        sample = random.sample(range(orig_points),int(orig_points/10))
+        #print('sample',sample)
+        temp1=[]
+        temp2=[]
+        for i in sample:
+            temp1.append(valid_points[i])
+            temp2.append(valid_points_prev[i])
+        
+        ransac_Top = barfoot_solve(np.array(temp1), np.array(temp2))
+        
+   
+        points_clean=[]
+        points_clean_prev=[]
 
         
-#         b=np.zeros([1,3])
-#         print(feature.SO3.wedge([1,0,0]))
-#         print(Cop)
-#         print(W.T)
-#         b[0,0] = np.trace(feature.SO3.wedge([1,0,0])@Cop@W.T)
-#         b[0,1] = np.trace(feature.SO3.wedge([0,1,0])@Cop@W.T)
-#         b[0,2] = np.trace(feature.SO3.wedge([0,0,1])@Cop@W.T)
+        for i in range(orig_points):
+            y=np.append(valid_points[i],1)
+            z=ransac_Top@(np.append(valid_points_prev[i],1)).T
+            
+            # print('observed',y)
+            # print(ransac_Top)
+            # print('transformed',z)
+            # print('norm',np.linalg.norm(y-z))
+            if np.linalg.norm(y-z) < .01:
+                if len(points_clean) == 0:
+                    points_clean = valid_points[i]
+                    points_clean_prev = valid_points_prev[i]
+                    print('y',y)
+                    print('z',z)
+                else:        
+                    points_clean=np.vstack((points_clean,valid_points[i]))
+                    points_clean_prev=np.vstack((points_clean_prev,valid_points_prev[i]))
 
-#         a=np.vstack((Y.T-Cop@(P-rop).T, b.T-feature.SO3.wedge(Y)@Cop@(P-rop).T))
         
-#         #Optimizied pertubation point
-#         eopt=Tau@np.linalg.inv(M)@Tau.T@a
-        
-#         return eopt
+        counter +=1
+        if len(points_clean)>d:
+
+            d=len(points_clean)
+            points_hold=points_clean
+            points_hold_prev=points_clean_prev
+            if d>orig_points*2/3:
+                print('pass')
+                ransacing=False
+        print(d)
+        if counter>10:
+            
+            valid_points=points_hold
+            valid_points_prev=points_hold_prev   
+            print('removed via ransac',orig_points-len(valid_points))
+            ransacing = False 
+
+    Top_ = barfoot_solve(valid_points, valid_points_prev)
+    Top_=np.linalg.inv(Top_)
+    # print("Calculated Top", Top_)
+    # r = Top_[0:3, 0:3]
+    # t = Top_[0:3, 3]
+
+    # Top_[0:3, 3] = -r.T@t
+    # Top_[0:3, 0:3]=r
+    # print("algopt: ", algopt)
+
+    
+    #print('Top barfoot:',Top_)
+    
+    return Top_

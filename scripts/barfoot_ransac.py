@@ -58,6 +58,10 @@ class Odometry(Node):
         self.k = np.array([[607.79150390625, 0, 319.30987548828125],
                            [0, 608.1211547851562, 236.9514617919922],
                            [0, 0, 1]], dtype=np.float32)
+        self.k= np.array([[614.1116333007812, 0.0, 435.7021179199219],
+                         [ 0.0, 614.4840087890625, 245.649658203125],
+                          [0,0,1]],dtype=np.float32)
+
 
     def callback_rgb(self, image_msg):
         self.imageFrame = self.br.imgmsg_to_cv2(image_msg)
@@ -99,14 +103,19 @@ class Odometry(Node):
             # Estimate Motion
             if not skip_estimate and self.pointCloudFrame is not None:
                 # Estimate Change in Pose
-                pose_perturb = estimate_motion(matches, self.kp_last, kp, self.k, self.pointCloudFrame)
-
-                pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame,self.pointCloudFrame ,np.linalg.inv(pose_perturb))
+                test= 'bar'
+                if test == 'bar':
+                    pose_perturb_bar = estimate_motion_barfoot_ransac(matches, self.kp_last, kp, self.k, self.pointCloudFrame_last,self.pointCloudFrame,None,None)
+                    self.pose = self.pose @ pose_perturb_bar
+                    print('step barfoot:',pose_perturb_bar)
+                elif test=='pnp':
+                    pose_perturb = estimate_motion(matches, self.kp_last, kp, self.k, self.pointCloudFrame)
+                    print('step pnp:',pose_perturb)
+                    self.pose = self.pose @ np.linalg.inv(pose_perturb)
+                    
                 # Update Current Position
-                print('step rasnac:',np.linalg.inv(pose_perturb))
-                print('step barfoot:',pose_perturb_bar)
-                self.pose = self.pose @ pose_perturb_bar
-                #print(self.pose)
+                #print('step rasnac:',np.linalg.inv(pose_perturb))
+                print('Pose',self.pose)
 
                 # Build Trajectory
                 coordinates = np.array([[self.pose[0, 3], self.pose[1, 3], self.pose[2, 3]]])
@@ -119,15 +128,15 @@ class Odometry(Node):
         self.imageFrame_last = self.imageFrame
 
         # Publish content
-        bigT = np.array([[0.0, 0.0, 1.0, 0.0],
-                        [-1.0, 0.0, 0.0, 0.0],
-                        [0.0, -1.0, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 1.0]])
-        corrected_pose = bigT @ self.pose
+        # bigT = np.array([[0.0, 0.0, 1.0, 0.0],
+        #                 [-1.0, 0.0, 0.0, 0.0],
+        #                 [0.0, -1.0, 0.0, 0.0],
+        #                 [0.0, 0.0, 0.0, 1.0]])
+        # corrected_pose = bigT @ self.pose
 
         q = tf_transformations.quaternion_from_matrix(self.pose)
 
-        t_vec = corrected_pose[0:3,3]
+        t_vec = self.pose[0:3,3]
         # print(t_rot.shape)
         # t_act = -self.Top_[:3,:3].T@t_rot
 
