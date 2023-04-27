@@ -20,7 +20,7 @@ from cv_bridge import CvBridge
 from voLib import *
 from feature_points_pnpransac_debug import FeaturePoints
 import sys
-sys.path.insert(0, '/home/purt-admin/git/pyecca/notebooks/BA')
+sys.path.insert(0, '/home/scoops/git/Riley_Fork/pyecca/notebooks/BA')
 import BF_PCA
 
 
@@ -32,7 +32,7 @@ skip_match = False
 skip_estimate = False
 print_pose = False
 save_pose = True
-box_test = False
+box_test = True
 
 class Odometry(Node):
     def __init__(self):
@@ -69,7 +69,7 @@ class Odometry(Node):
         self.k = np.array([[607.79150390625, 0, 319.30987548828125],
                            [0, 608.1211547851562, 236.9514617919922],
                            [0, 0, 1]], dtype=np.float32)
-        self.motion_counter = 0
+        self.box_test_counter = 0
         self.xyz_test_prev = None
         self.xyz_test = None
 
@@ -95,8 +95,7 @@ class Odometry(Node):
 
             # Hardcode box test problem
             if box_test:
-                self.motion_counter += 1
-                points_map, points_meas, points_meas_prev = self.box_test_case(self.motion_counter)
+                points_map, points_meas, points_meas_prev = self.box_test_case()
                 
                 xyz_points = points_meas
                 xyz_points_prev = points_meas_prev
@@ -140,17 +139,17 @@ class Odometry(Node):
                 # Estimate Change in Pose
                 pose_perturb = estimate_motion(matches, self.kp_last, kp, self.k, self.pointCloudFrame)
 
-                # pose_perturb_bar = estimate_motion_barfoot_ransac(matches, self.kp_last, kp, self.k, self.pointCloudFrame_last, self.pointCloudFrame,  self.xyz_test_prev, self.xyz_test)
+                pose_perturb_bar = estimate_motion_barfoot_ransac(matches, self.kp_last, kp, self.k, self.pointCloudFrame_last, self.pointCloudFrame,  self.xyz_test_prev, self.xyz_test)
                 #self.pose_prev=pose_perturb_bar
-                #pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame_last, self.pointCloudFrame,  self.xyz_test_prev, self.xyz_test)
+                # pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame_last, self.pointCloudFrame,  self.xyz_test_prev, self.xyz_test)
                 # Update Current Position
-                #print('step barfoot:',pose_perturb_bar)
-                self.pose = self.pose @ np.linalg.inv(pose_perturb)
+                # print('step barfoot:',pose_perturb_bar)
+                self.pose = self.pose @ pose_perturb_bar
                 #self.pose = self.pose @ pose_perturb_bar
                 #self.pose_test = self.pose_test @ np.linalg.inv(pose_perturb)
                 #print(self.pose)
                 #print(self.pose_test)
-                print("barfoot",pose_perturb_bar)
+                # print("barfoot",pose_perturb_bar)
                 #print("pnpransac",np.linalg.inv(pose_perturb))
                 
                 # Build Trajectory
@@ -186,9 +185,9 @@ class Odometry(Node):
         msg.pose.position.z = float(t_vec[2])
         msg.header.frame_id = "map"
         if box_test:
-            msg.pose.orientation.x = -q[0]
-            msg.pose.orientation.y = -q[1]
-            msg.pose.orientation.z = -q[2]
+            msg.pose.orientation.x = q[0]
+            msg.pose.orientation.y = q[1]
+            msg.pose.orientation.z = q[2]
         else:
             msg.pose.orientation.x = -q[2]
             msg.pose.orientation.y = -q[0]
@@ -204,9 +203,9 @@ class Odometry(Node):
         t.header.frame_id = "map"
         t.child_frame_id = "vehicle_frame"
         if box_test:
-            t.transform.rotation.x = -q[0]
-            t.transform.rotation.y = -q[1]
-            t.transform.rotation.z = -q[2]
+            t.transform.rotation.x = q[0]
+            t.transform.rotation.y = q[1]
+            t.transform.rotation.z = q[2]
         else:
             t.transform.rotation.x = -q[2]
             t.transform.rotation.y = -q[0]
@@ -218,7 +217,7 @@ class Odometry(Node):
         np.save("out", self.trajectory)
 
 
-    def box_test_case(self, motion_counter):
+    def box_test_case(self):
         # Define points in world ("map") frame
         points_map = np.array([
             [1, 2, 3],
@@ -232,43 +231,27 @@ class Odometry(Node):
             ])
         points_map = np.tile(points_map,(20,1))
 
-        # Define velocity and euler angle rotations as a function of time_step
-        # roll z, roll y, roll x
-        omega = -np.array([0.03,.02,.01])
-        # trans x, trans y, trans z
-        v = -np.array([[.01],
-                    [.02],
-                    [.03],
-                    ])
+        # Measure points with current position
+        points_meas_prev = self.meas_points(self.pose, points_map)
 
-        # Define rotation and translation for current time step
-        # R_true = BF_PCA.euler2rot(omega[0]*motion_counter, omega[1]*motion_counter, omega[2]*motion_counter)
-        # t_true = v*motion_counter
-        # print(self.motion_counter)
-        # Craft the "truth" transformation matrix
-        # T_01_true = np.vstack([np.hstack([R_true, t_true]), np.array([[0, 0, 0, 1]])])
-        
-        feature=FeaturePoints()
-        T_01_true = np.block([
-            [BF_PCA.euler2rot(-omega[0],-omega[1],-omega[2]), -v],
-            [np.zeros((1,3)), np.array(1)]
-        ])
-        print(T_01_true)
-        # Apply the "truth" transformation matrix to all points_map
-        points_meas = BF_PCA.applyT(points_map, T_01_true)
+        # User inputs here:
+        t_vec = [0.01, 0.0, 0.0]         # x, y, z
+        angles_vec = [0.0, 0.0, 0.01]    # roll, pitch, yaw euler angles (1-2-3 sequence)
 
-        # Define rotation and translation for current time step
-        motion_counter = motion_counter - 1
-        R_true_prev = BF_PCA.euler2rot(omega[0]*motion_counter, omega[1]*motion_counter, omega[2]*motion_counter)
-        t_true_prev = v*motion_counter
-        
-        # Craft the "truth" transformation matrix
-        # T_01_true_prev = np.vstack([np.hstack([R_true_prev, t_true_prev]), np.array([[0, 0, 0, 1]])])
-        T_01_true_prev = np.eye(4)
-        # Apply the "truth" transformation matrix to all points_map
-        points_meas_prev = BF_PCA.applyT(points_map, T_01_true_prev)
-        
-        # print('T_01_true:', T_01_true)
+        # Propogate movement and measure points again with new position
+        T_frame2frame = self.calc_T_frame2frame(t_vec, angles_vec)
+        new_pose = self.robot_move(self.pose, T_frame2frame)
+        points_meas = self.meas_points(new_pose, points_map)
+
+        # For comparison with self.pose
+        # Note these are both for the previous time step. -1 is needed because first time box_test is run barfoot is skipped (first starting node)
+        truth_pose = np.linalg.matrix_power(T_frame2frame, self.box_test_counter-1)
+        print('truth_pose: ', np.round(truth_pose,6))
+        print('self.pose: ', np.round(self.pose,6))
+
+        # Debugging
+        # T_frame2frame can compare against pose_perturb_bar
+        # print('T_frame2frame: ', T_frame2frame)
 
         msg = Marker()
         msg.type = Marker.POINTS
@@ -294,8 +277,71 @@ class Odometry(Node):
             msg.colors.append(white)
         self.pub_marker_.publish(msg)
 
+        # Increment box_counter
+        self.box_test_counter += 1
+
         return points_map, points_meas, points_meas_prev
 
+    def euler2rot(self, phi, theta, psi):
+        # Assumes roll, pitch, yaw sequence (1-2-3)
+        # phi - roll angle in radians
+        # theta - pitch angle in radians
+        # psi - yaw angle in radians
+        Rx = np.array([[1, 0, 0],
+                    [0, np.cos(phi), -np.sin(phi)],
+                    [0, np.sin(phi), np.cos(phi)],
+                    ])
+        Ry = np.array([[np.cos(theta), 0, np.sin(theta)],
+                    [0, 1, 0],
+                    [-np.sin(theta), 0, np.cos(theta)],
+                    ])
+        Rz = np.array([[np.cos(psi), -np.sin(psi), 0],
+                    [np.sin(psi), np.cos(psi), 0],
+                    [0, 0, 1],
+                    ])
+        
+        R = Rx @ Ry @ Rz
+        
+        return R
+    
+    def calc_T_frame2frame(self, t_change_body, euler_change_body):
+        # Calculates an SE(3) element
+        # t_change_body - (3,1), (1,3), or (3,) vector with xyz translation
+        # euler_change_body - (3,1), (1,3), or (3,) vector with roll, pitch, yaw Euler angles for XYZ rotation sequence.
+        
+        R = self.euler2rot(euler_change_body[0], euler_change_body[1], euler_change_body[2])
+        
+        T = np.eye(4)
+        
+        T[0:3, 0:3] = R
+        T[0, 3] = t_change_body[0]
+        T[1, 3] = t_change_body[1]
+        T[2, 3] = t_change_body[2]
+        
+        return T
+    
+    def meas_points(self, T_map2body_map, points_map):
+        # Parse T_map2body_map
+        t_map = T_map2body_map[0:3, 3]
+        R_map2body = T_map2body_map[0:3, 0:3]
+        
+        y_map = np.zeros([len(points_map), 3])
+        y_body = np.zeros([len(points_map), 3])
+        for lcv, point in enumerate(points_map):
+            # Point - Body = vector from body to point in map frame
+            y_map[lcv, :] = points_map[lcv, :] - t_map
+            
+            # Convert map frame measurements to body frame via R_map2body
+            y_body[lcv, :] = np.linalg.inv(R_map2body) @ y_map[lcv, :]
+        
+        return y_body
+    
+    def robot_move(self, T_start_map, T_frame2frame):
+        # Translate then rotate
+        # Translate in current body frame, then rotate once you arrive to the new location.
+        
+        # Result is in map frame
+        return T_start_map @ T_frame2frame
 
 def main(args=None):
     rclpy.init(args=args)

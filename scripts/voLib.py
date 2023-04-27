@@ -315,11 +315,14 @@ def estimate_motion_barfoot_ransac(matches, kp_last, kp, k, pointCloud_last, poi
         x2, y2 = kp[match[0].trainIdx].pt
         pxl_list_last.append([int(x1), int(y1)])
         pxl_list.append([int(x2), int(y2)])
-    
-   
-    # Read point cloud data
-    points = read_point_efficient(pointCloud, pxl_list)
-    points_prev = read_point_efficient(pointCloud_last, pxl_list_last)
+
+    if xyz_test is not None:
+        points = xyz_test
+        points_prev = xyz_test_prev
+    else:
+        # Read point cloud data
+        points = read_point_efficient(pointCloud, pxl_list)
+        points_prev = read_point_efficient(pointCloud_last, pxl_list_last)
 
     # Remove pixel locations if there is no corresponding point
     for point in range(len(points)):
@@ -331,10 +334,6 @@ def estimate_motion_barfoot_ransac(matches, kp_last, kp, k, pointCloud_last, poi
     valid_points_prev=np.vstack(valid_points_prev)    
     valid_points=np.vstack(valid_points)   
     print('pre-ransac',len(valid_points))
-
-    if xyz_test is not None:
-        valid_points = xyz_test
-        valid_points_prev = xyz_test_prev
 
     ransacing = True
     d=0
@@ -404,7 +403,7 @@ def estimate_motion_barfoot_ransac(matches, kp_last, kp, k, pointCloud_last, poi
     # t = Top_[0:3, 3]
 
     # Top_[0:3, 3] = -r.T@t
-    # Top_[0:3, 0:3]=r
+    # Top_[0:3, 0:3] = r
     # print("algopt: ", algopt)
 
     
