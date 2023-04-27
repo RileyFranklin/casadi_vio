@@ -231,17 +231,18 @@ class Odometry(Node):
             ])
         points_map = np.tile(points_map,(20,1))
 
-        # Measure points with current position
-        points_meas_prev = self.meas_points(self.pose, points_map)
-
         # User inputs here:
         t_vec = [0.01, 0.0, 0.0]         # x, y, z
         angles_vec = [0.0, 0.0, 0.01]    # roll, pitch, yaw euler angles (1-2-3 sequence)
+        noise_std = 0.05
+
+        # Measure points with current position
+        points_meas_prev = self.meas_points(self.pose, points_map, noise_std)
 
         # Propogate movement and measure points again with new position
         T_frame2frame = self.calc_T_frame2frame(t_vec, angles_vec)
         new_pose = self.robot_move(self.pose, T_frame2frame)
-        points_meas = self.meas_points(new_pose, points_map)
+        points_meas = self.meas_points(new_pose, points_map, noise_std)
 
         # For comparison with self.pose
         # Note these are both for the previous time step. -1 is needed because first time box_test is run barfoot is skipped (first starting node)
@@ -320,7 +321,7 @@ class Odometry(Node):
         
         return T
     
-    def meas_points(self, T_map2body_map, points_map):
+    def meas_points(self, T_map2body_map, points_map, noise_std):
         # Parse T_map2body_map
         t_map = T_map2body_map[0:3, 3]
         R_map2body = T_map2body_map[0:3, 0:3]
@@ -333,6 +334,9 @@ class Odometry(Node):
             
             # Convert map frame measurements to body frame via R_map2body
             y_body[lcv, :] = np.linalg.inv(R_map2body) @ y_map[lcv, :]
+
+            # Add noise
+            y_body[[lcv], :] += np.random.randn(1,3)*noise_std
         
         return y_body
     

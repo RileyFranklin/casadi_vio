@@ -329,8 +329,9 @@ def estimate_motion_barfoot_ransac(matches, kp_last, kp, k, pointCloud_last, poi
         if np.linalg.norm(points[point]) > 0.05 and np.linalg.norm(points[point]) <40 :
             valid_points.append(points[point])
             valid_points_prev.append(points_prev[point])
-            valid_pxl_list.append(pxl_list[point])
-            valid_pxl_list_prev.append(pxl_list_last[point])
+            if xyz_test is None:
+                valid_pxl_list.append(pxl_list[point])
+                valid_pxl_list_prev.append(pxl_list_last[point])
     valid_points_prev=np.vstack(valid_points_prev)    
     valid_points=np.vstack(valid_points)   
     print('pre-ransac',len(valid_points))
@@ -368,7 +369,7 @@ def estimate_motion_barfoot_ransac(matches, kp_last, kp, k, pointCloud_last, poi
             # print(ransac_Top)
             # print('transformed',z)
             # print('norm',np.linalg.norm(y-z))
-            if np.linalg.norm(y-z) < .01:
+            if np.linalg.norm(y-z) < 0.1:
                 if len(points_clean) == 0:
                     points_clean = valid_points[i]
                     points_clean_prev = valid_points_prev[i]
