@@ -26,10 +26,10 @@ from tf2_ros import TransformBroadcaster
 
 import sys
 import time
-sys.path.insert(0, '/home/purt-admin/git/pyecca')
+sys.path.insert(0, '/home/purt/Github/RileyFranklin/pyecca')
 from pyecca.lie_numpy import se3, so3
 
-sys.path.insert(0, '/home/purt-admin/git/pyecca/notebooks/BA')
+sys.path.insert(0, '/home/purt/Github/RileyFranklin/pyecca/notebooks/BA')
 import BF_PCA
 
 class FeaturePoints(Node):
@@ -107,14 +107,15 @@ class FeaturePoints(Node):
         r = T[:3,3]
         return np.vstack((np.hstack((C, self.SO3.wedge(r)@C)), np.hstack((np.zeros([3,3]),C))))
 
-    def barfoot_solve(self, Top, p, y, M):
+    def barfoot_solve(self, Top, p, y, M, weight):
         #the incorporated weights assume that every landmark is observed len(y) = len(w) = len(p)
         Tau = self.Ad(Top)
         Cop = Top[:3,:3]
         rop = np.expand_dims((-Cop.T@Top[:3,3]), axis=0)
         
-        P = np.expand_dims(np.average(p,axis=0), axis=0)
-        Y = np.expand_dims(np.average(y,axis=0), axis=0)
+        wg = np.sum(weight)
+        P = np.expand_dims(np.average(p,axis=0, weights=weight), axis=0)
+        Y = np.expand_dims(np.average(y,axis=0, weights=weight), axis=0)
         
         #---- Calculate M matrix outside to save computational power
         # I = 0
@@ -135,7 +136,7 @@ class FeaturePoints(Node):
             yj = y[[j],:]
 
             W += (yj-Y).T@(pj-P)
-        W = W/len(y)
+        W = W/wg
         
         b=np.zeros([1,3])
         b[0,0] = np.trace(self.SO3.wedge([1,0,0])@Cop@W.T)

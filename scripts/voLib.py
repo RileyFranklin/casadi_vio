@@ -8,6 +8,7 @@ import array
 from sensor_msgs_py import point_cloud2
 from  feature_points_pnpransac_debug import FeaturePoints
 import random
+from math import isinf
 
 def estimate_motion(matches, kp_last, kp, k, pointCloud):
     # Declare lists and arrays
@@ -76,6 +77,7 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud
     points = read_point_efficient(pointCloud, pxl_list)
     points_prev = read_point_efficient(pointCloud_last, pxl_list_last)
 
+
     # Remove pixel locations if there is no corresponding point
     for point in range(len(points)):
         if np.linalg.norm(points[point]) > 0.05 and np.linalg.norm(points[point]) <20 :
@@ -123,36 +125,60 @@ def estimate_motion_barfoot(matches, kp_last, kp, k, pointCloud_last, pointCloud
     if xyz_test is not None:
         valid_points = xyz_test
         valid_points_prev = xyz_test_prev
+
+    #----------------------------
+    #Create weighted factor for the observed "y" points
+    weight = []
+    for i in range(len(valid_points)):
+        #further away the object, the less weight
+        w = 1/valid_points[i, 2]
+        #deal with inf value
+        if isinf(w):
+            w = 1
+        weight.append(w)
+
+        print("pts", valid_points[i])
+        print("Weight: ", w)
+
+    weight = np.array(weight)
+    #----------------------------
  
     if len(valid_points) > 5:
         print('success')
-        P = np.average(valid_points_prev, axis=0)
-        print(valid_points_prev[:10,:])
-        Pexp_dim = np.average(valid_points_prev[:10,:], axis=0)
-        print(Pexp_dim)
-        Y = np.average(valid_points,axis=0)
+
+        wg = np.sum(weight)
+        P = np.average(valid_points_prev, axis=0, weights=weight)
+        Y = np.average(valid_points,axis=0, weights=weight)
+        # print(valid_points_prev[:10,:])
+        # Pexp_dim = np.average(valid_points_prev[:10,:], axis=0)
+        # print(Pexp_dim)
+        
         I = 0
         for j in range(len(valid_points_prev)):
             pint0 = valid_points_prev[j,:] - P
-            I += feature.SO3.wedge(pint0)@feature.SO3.wedge(pint0)
-        I=-I/len(valid_points_prev)
+            I += weight[j]*feature.SO3.wedge(pint0)@feature.SO3.wedge(pint0)
+        I=-I/wg
         
         M1 = np.vstack((np.hstack((np.eye(3), np.zeros([3,3]))), np.hstack((feature.SO3.wedge(P),np.eye(3)))))
         M2 = np.vstack((np.hstack((np.eye(3), np.zeros([3,3]))), np.hstack((np.zeros([3,3]),I))))
         M3 = np.vstack((np.hstack((np.eye(3), -feature.SO3.wedge(P))), np.hstack((np.zeros([3,3]),np.eye(3)))))
-        M=M1@M2@M3
-        algopt=None
-        counter=0
+        M = M1@M2@M3
+        algopt = None
+        counter = 0
+
+        # print("y", valid_points)
+        # print("p", valid_points_prev)
+
         while (algopt is None or np.linalg.norm(algopt)>1e-10) and counter<100:    
-            algopt = feature.barfoot_solve(Top_, valid_points_prev, valid_points, M)
+            algopt = feature.barfoot_solve(Top_, valid_points_prev, valid_points, M, weight)
             Top_ = feature.SE3.exp(feature.SE3.wedge(algopt))@Top_
             counter += 1
         #print('converged after ',counter,' iterations')
         r = Top_[0:3, 0:3]
         t = Top_[0:3, 3]
-        # Top_[0:3,0:3]=r.T
-        # Top_[0:3, 3] = -r.T@t
-        print('algopt',feature.SE3.vee(feature.SE3.log(Top_)))
+        Top_[0:3,0:3]=r.T
+        Top_[0:3, 3] = -r.T@t
+        # print('algopt',feature.SE3.vee(feature.SE3.log(Top_)))
         p_test = np.array([1,2,3,1])
         print('T_op @ p_test: ', Top_ @ p_test)
         #print("algopt: ", algopt)
@@ -209,7 +235,7 @@ def stream_matches(imageFrame_last, kp_last, imageFrame, kp, matches):
                        flags=cv2.DrawMatchesFlags_DEFAULT)
 
     # Create Images
-    visual = cv2.drawMatchesKnn(imageFrame, kp, imageFrame_last, kp_last, matches, None, **draw_params)
+    visual = cv2.drawMatchesKnn(imageFrame_last, kp_last, imageFrame, kp, matches, None, **draw_params)
 
     # Draw Images
     cv2.imshow("Matches", visual)
@@ -399,10 +425,9 @@ def estimate_motion_barfoot_ransac(matches, kp_last, kp, k, pointCloud_last, poi
 
     Top_ = barfoot_solve(valid_points, valid_points_prev)
     Top_=np.linalg.inv(Top_)
-    # print("Calculated Top", Top_)
-    # r = Top_[0:3, 0:3]
-    # t = Top_[0:3, 3]
-
+    print("Calculated Top", Top_)
+    r = Top_[0:3, 0:3]
+    t = Top_[0:3, 3]
     # Top_[0:3, 3] = -r.T@t
     # Top_[0:3, 0:3] = r
     # print("algopt: ", algopt)
