@@ -13,7 +13,7 @@ from geometry_msgs.msg import PoseStamped, TransformStamped
 from tf2_ros import TransformBroadcaster
 import tf_transformations
 from cv_bridge import CvBridge
-from voLib import *
+from voLib_debug import *
 
 import sys
 sys.path.insert(0, '/home/purt/Github/RileyFranklin/pyecca')
@@ -141,7 +141,7 @@ class Odometry(Node):
                 #pose_perturb_bar = estimate_motion_barfoot(matches, self.kp_last, kp, self.k, self.pointCloudFrame, self.pointCloudFrame,None,None)
                 # pose_perturb = estimate_motion(matches, kp,self.kp_last, self.k, self.pointCloudFrame)
                 # print("incremental ransasc: ",pose_perturb)
-                pose_perturb_bar = estimate_motion_barfoot_ransac(matches, self.kp_last, kp, self.k, self.pointCloudFrame_last, self.pointCloudFrame,None,None)
+                pose_perturb_bar = estimate_motion_barfoot_ransac(matches, self.kp_last, kp, self.k, self.pointCloudFrame, self.pointCloudFrame,None,None)
                 print("incremental barfoot: \n",pose_perturb_bar) 
                 # Update Current Position
                 # self.pose = pose_perturb_bar
